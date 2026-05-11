@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://beatbridge.dev/schemas/chart.schema.json",
+  "title": "Chart",
+  "description": "BeatBridge chart contract. See CLAUDE.md for field semantics.",
+  "type": "object",
+  "required": ["version", "audio", "metadata", "notes"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Schema version. Bump on breaking changes.",
+      "const": "1.0"
+    },
+    "audio": {
+      "type": "object",
+      "required": ["source", "duration", "bpm"],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["youtube", "upload", "synthetic"]
+        },
+        "videoId": { "type": "string" },
+        "contentHash": { "type": "string" },
+        "duration": { "type": "number", "minimum": 0 },
+        "bpm": { "type": "number", "minimum": 0 },
+        "bpmCurve": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [
+              { "type": "number", "minimum": 0 },
+              { "type": "number", "minimum": 0 }
+            ],
+            "minItems": 2,
+            "maxItems": 2
+          }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["generatedAt", "pipelineVersion", "difficulty", "keyMode"],
+      "additionalProperties": false,
+      "properties": {
+        "generatedAt": { "type": "string", "format": "date-time" },
+        "pipelineVersion": { "type": "string" },
+        "difficulty": { "type": "string", "enum": ["easy", "normal", "hard"] },
+        "keyMode": { "type": "integer", "enum": [4] },
+        "title": { "type": "string" },
+        "artist": { "type": "string" }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["t", "lane", "type"],
+        "additionalProperties": false,
+        "properties": {
+          "t": { "type": "number", "minimum": 0 },
+          "lane": { "type": "integer", "minimum": 0, "maximum": 3 },
+          "type": { "type": "string", "enum": ["tap", "hold"] },
+          "duration": { "type": "number", "minimum": 0 }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "type": { "const": "hold" } } },
+            "then": { "required": ["duration"] }
+          }
+        ]
+      }
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["start", "end"],
+        "additionalProperties": false,
+        "properties": {
+          "start": { "type": "number", "minimum": 0 },
+          "end": { "type": "number", "minimum": 0 },
+          "intensity": { "type": "number", "minimum": 0, "maximum": 1 },
+          "label": { "type": "string" }
+        }
+      }
+    }
+  }
+}

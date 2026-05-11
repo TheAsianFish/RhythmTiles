@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+.npm/
+.pnpm-store/
+.parcel-cache/
+.vite/
+
+# Build artifacts
+extension/dist/
+extension/build/
+backend/dist/
+
+# Audio + cache
+backend/cache/
+backend/data/
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+!tests/fixtures/*.wav
+
+# SQLite
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Env + secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# OS
+desktop.ini
