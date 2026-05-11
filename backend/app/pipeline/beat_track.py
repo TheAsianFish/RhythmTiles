@@ -24,7 +24,10 @@ def detect_beats(*, y: "np.ndarray", sr: int) -> BeatInfo:
     decides we need per-segment tempo (madmom).
     """
     import librosa  # noqa: WPS433
+    import numpy as np  # noqa: WPS433
 
     tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, units="frames")
+    # librosa returns tempo as a 1-element numpy array in recent versions.
+    tempo_scalar = float(np.atleast_1d(np.asarray(tempo)).ravel()[0])
     beat_times = librosa.frames_to_time(beat_frames, sr=sr).tolist()
-    return BeatInfo(bpm=float(tempo), beats=[float(b) for b in beat_times], bpm_curve=None)
+    return BeatInfo(bpm=tempo_scalar, beats=[float(b) for b in beat_times], bpm_curve=None)
