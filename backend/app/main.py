@@ -10,6 +10,8 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import asyncio
+
 from app import __version__
 from app.config import settings
 from app.middleware import RequestIdMiddleware
@@ -42,6 +44,15 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIdMiddleware)
     app.include_router(health.router)
     app.include_router(charts.router)
+
+    @app.on_event("startup")
+    async def _warmup() -> None:
+        # Warm numba/JIT off the main thread so startup is non-blocking.
+        from app.pipeline.warmup import warm_pipeline
+
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, warm_pipeline)
+
     return app
 
 

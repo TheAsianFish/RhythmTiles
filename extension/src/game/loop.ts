@@ -50,8 +50,9 @@ export class GameLoop {
   private activeHolds = new Map<number, ActiveHold>();
   private callbacks: LoopCallbacks;
   private unsubscribeInput: (() => void) | null = null;
-  // Indexes of notes whose miss has already been folded into the score state.
-  private countedMissIndexes = new Set<number>();
+  // Index up to which we have already folded misses into the score state.
+  // Each frame we only need to inspect notes between this value and the cursor.
+  private missAccountedUpTo = 0;
 
   constructor(opts: GameLoopOptions) {
     this.chart = opts.chart;
@@ -146,15 +147,17 @@ export class GameLoop {
 
     // Advance cursor; mark past-window notes as missed.
     this.cursor = advanceCursor(this.notes, this.cursor, gameMs);
-    // Fold any newly-missed notes into the score state exactly once.
-    for (const n of this.notes) {
-      if (n.missed && !this.countedMissIndexes.has(n.index)) {
-        this.countedMissIndexes.add(n.index);
+    // Fold any newly-missed notes into the score state. Bounded by the cursor;
+    // notes ahead of the cursor cannot yet be missed.
+    for (let i = this.missAccountedUpTo; i < this.cursor; i++) {
+      const n = this.notes[i]!;
+      if (n.missed) {
         this.score = applyMiss(this.score);
         this.score.multiplier = multiplierFor(this.score.combo);
         this.lastJudgment = { judgment: "miss", deltaMs: 0, atMs: gameMs };
       }
     }
+    this.missAccountedUpTo = this.cursor;
 
     // Drive the renderer.
     this.callbacks.onFrame({
