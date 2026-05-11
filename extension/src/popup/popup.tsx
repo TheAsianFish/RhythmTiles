@@ -83,8 +83,15 @@ function App() {
         Lanes: D, F, J, K. Press the matching key as a note crosses the line. The popup will close
         when the game starts; bring focus back here to stop.
       </p>
+
+      <button onClick={openCalibration}>Calibrate timing</button>
     </div>
   );
+}
+
+function openCalibration() {
+  const url = chrome.runtime.getURL("src/calibration/calibration.html");
+  chrome.tabs.create({ url });
 }
 
 async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {

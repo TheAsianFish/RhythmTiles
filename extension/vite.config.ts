@@ -44,6 +44,7 @@ export default defineConfig({
       input: {
         popup: resolve(__dirname, "src/popup/popup.html"),
         overlay: resolve(__dirname, "src/overlay/overlay.html"),
+        calibration: resolve(__dirname, "src/calibration/calibration.html"),
         "service-worker": resolve(__dirname, "src/background/service-worker.ts"),
         "content-script": resolve(__dirname, "src/content/content-script.ts"),
       },

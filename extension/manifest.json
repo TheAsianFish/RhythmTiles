@@ -23,8 +23,13 @@
   "host_permissions": ["http://localhost:8000/*"],
   "web_accessible_resources": [
     {
-      "resources": ["src/overlay/overlay.html", "assets/*", "sample-chart.json"],
-      "matches": ["https://www.youtube.com/*"]
+      "resources": [
+        "src/overlay/overlay.html",
+        "src/calibration/calibration.html",
+        "assets/*",
+        "sample-chart.json"
+      ],
+      "matches": ["https://www.youtube.com/*", "<all_urls>"]
     }
   ]
 }
