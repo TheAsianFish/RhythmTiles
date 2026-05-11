@@ -1,0 +1,82 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  color: #f4f6f8;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow: hidden;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.toolbar {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  gap: 8px;
+  z-index: 10;
+  pointer-events: auto;
+}
+
+.toolbar button {
+  background: rgba(20, 24, 30, 0.8);
+  color: #f4f6f8;
+  border: 1px solid #2a2f37;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+
+.results {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.results-card {
+  background: #0f1218;
+  border: 1px solid #232830;
+  padding: 28px 32px;
+  border-radius: 12px;
+  min-width: 320px;
+  text-align: center;
+}
+
+.results h2 {
+  margin: 0 0 14px;
+}
+
+.results .score {
+  font-size: 36px;
+  font-weight: 700;
+  margin: 8px 0;
+}
+
+.banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 24, 30, 0.8);
+  color: #f4f6f8;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  z-index: 10;
+}
