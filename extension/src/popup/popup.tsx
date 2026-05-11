@@ -1,26 +1,34 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { pingHealth } from "@/api/backend-client";
+import { backendUrl, pingHealthDetailed } from "@/api/backend-client";
 import type { Difficulty } from "@/types/chart";
 
 type BackendStatus = "unknown" | "ok" | "down";
 
 function App() {
   const [status, setStatus] = useState<BackendStatus>("unknown");
+  const [healthError, setHealthError] = useState<string | null>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>("normal");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const ok = await pingHealth();
-      if (!cancelled) setStatus(ok ? "ok" : "down");
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const refreshHealth = useCallback(async () => {
+    setStatus("unknown");
+    setHealthError(null);
+    const ping = await pingHealthDetailed();
+    setStatus(ping.ok ? "ok" : "down");
+    setHealthError(ping.ok ? null : ping.error ?? "unknown error");
   }, []);
+
+  useEffect(() => {
+    void refreshHealth();
+    // Re-check while the popup is open so the user doesn't get stuck on
+    // a stale "down" if they boot the server after opening the popup.
+    const id = window.setInterval(() => {
+      if (status !== "ok") void refreshHealth();
+    }, 3000);
+    return () => window.clearInterval(id);
+  }, [refreshHealth, status]);
 
   async function onStart() {
     setBusy(true);
@@ -35,10 +43,14 @@ function App() {
         setError("Open a YouTube video first.");
         return;
       }
-      await chrome.tabs.sendMessage(tab.id, {
+      const resp = (await chrome.tabs.sendMessage(tab.id, {
         type: "BB_START_GAME",
         difficulty,
-      });
+      })) as { ok: boolean; error?: string } | undefined;
+      if (!resp || !resp.ok) {
+        setError(resp?.error || "Content script did not respond. Reload the YouTube tab and try again.");
+        return;
+      }
       window.close();
     } catch (e) {
       setError((e as Error).message);
@@ -55,8 +67,22 @@ function App() {
       </div>
 
       <div className={`status ${status === "ok" ? "ok" : status === "down" ? "err" : "warn"}`}>
-        {status === "ok" && "Backend reachable."}
-        {status === "down" && "Backend not reachable on localhost:8000."}
+        {status === "ok" && `Backend reachable at ${backendUrl()}.`}
+        {status === "down" && (
+          <>
+            <div>Backend not reachable at {backendUrl()}.</div>
+            {healthError && (
+              <div style={{ marginTop: 4, opacity: 0.8 }}>Reason: {healthError}</div>
+            )}
+            <button
+              className="secondary"
+              style={{ marginTop: 8, padding: "4px 10px", fontSize: 12 }}
+              onClick={() => void refreshHealth()}
+            >
+              Retry
+            </button>
+          </>
+        )}
         {status === "unknown" && "Checking backend..."}
       </div>
 

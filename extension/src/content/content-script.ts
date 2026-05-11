@@ -80,6 +80,7 @@ function startClockBridge() {
 }
 
 async function startGame(difficulty: Difficulty) {
+  console.log("[BeatBridge] startGame", { difficulty, href: location.href });
   videoEl = findVideoElement();
   if (!videoEl) {
     console.warn("[BeatBridge] no video element on page");
@@ -90,14 +91,19 @@ async function startGame(difficulty: Difficulty) {
     return { ok: false, error: "could not parse videoId from URL" };
   }
   const duration = isFinite(videoEl.duration) ? videoEl.duration : undefined;
+  console.log("[BeatBridge] resolved", { videoId, duration });
 
   let chart: Chart;
   try {
     chart = await generateChart({ videoId, difficulty, duration });
+    console.log("[BeatBridge] chart loaded", {
+      notes: chart.notes.length,
+      bpm: chart.audio.bpm,
+    });
   } catch (e) {
     const msg = e instanceof BackendError ? e.message : (e as Error).message;
     console.warn("[BeatBridge] chart generation failed:", msg);
-    return { ok: false, error: msg };
+    return { ok: false, error: `chart generation failed: ${msg}` };
   }
 
   const iframe = ensureOverlay();
@@ -135,7 +141,12 @@ async function startGame(difficulty: Difficulty) {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || typeof msg !== "object") return false;
   if (msg.type === "BB_START_GAME") {
-    startGame(msg.difficulty || "normal").then(sendResponse);
+    startGame(msg.difficulty || "normal")
+      .then(sendResponse)
+      .catch((err) => {
+        console.error("[BeatBridge] startGame threw", err);
+        sendResponse({ ok: false, error: (err as Error).message });
+      });
     return true; // async response
   }
   if (msg.type === "BB_STOP_GAME") {
@@ -145,6 +156,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   return false;
 });
+
+console.log("[BeatBridge] content script loaded on", location.href);
 
 // Listen for messages from the overlay (e.g., "close me").
 window.addEventListener("message", (ev) => {

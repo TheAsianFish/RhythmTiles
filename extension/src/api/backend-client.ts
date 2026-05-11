@@ -34,10 +34,23 @@ export async function generateChart(req: GenerateRequest): Promise<Chart> {
 }
 
 export async function pingHealth(): Promise<boolean> {
+  const { ok } = await pingHealthDetailed();
+  return ok;
+}
+
+export interface HealthPing {
+  ok: boolean;
+  error?: string;
+  url: string;
+}
+
+export async function pingHealthDetailed(): Promise<HealthPing> {
+  const url = `${backendUrl()}/healthz`;
   try {
-    const resp = await fetch(`${backendUrl()}/healthz`, { method: "GET" });
-    return resp.ok;
-  } catch {
-    return false;
+    const resp = await fetch(url, { method: "GET", cache: "no-store" });
+    if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}`, url };
+    return { ok: true, url };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message, url };
   }
 }
