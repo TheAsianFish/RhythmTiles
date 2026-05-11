@@ -13,7 +13,11 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, UploadFile
 
+from pathlib import Path
+
+from app.audio.ingest import bytes_to_disk, fetch_videoid
 from app.cache import ChartCache
+from app.config import settings
 from app.models import (
     AudioMeta,
     Chart,
@@ -68,26 +72,49 @@ def _hardcoded_chart(req: GenerateRequest) -> Chart:
 
 @router.post("/generate", response_model=Chart, response_model_exclude_none=True)
 async def generate(req: GenerateRequest) -> Chart:
-    """Generate a chart. JSON body only.
+    """Generate a chart from a videoId.
 
-    Stage 1: returns a placeholder chart for any request.
-    Stage 2: returns a real chart when audio is available, otherwise placeholder.
+    Behaviour:
+      - cache hit on (videoId, difficulty) -> return cached chart.
+      - BACKEND_ALLOW_YTDLP=1 -> fetch audio via yt-dlp, run the real pipeline.
+      - otherwise -> return a placeholder chart so the extension has something
+        to render. This keeps the popup demo working without a yt-dlp install.
     """
     logger.info(
-        "generate request videoId=%s difficulty=%s",
+        "generate request videoId=%s difficulty=%s allow_ytdlp=%s",
         req.videoId,
         req.difficulty,
+        settings.allow_ytdlp,
     )
 
-    # Cache lookup.
     cache_key = req.videoId or req.audioUrl or "unknown"
     cached = _cache.get(content_hash=cache_key, difficulty=req.difficulty)
     if cached is not None:
         logger.info("cache hit for %s/%s", cache_key, req.difficulty)
         return cached
 
-    chart = _hardcoded_chart(req)
+    if settings.allow_ytdlp and req.videoId:
+        try:
+            ingested = fetch_videoid(req.videoId)
+            audio_bytes = ingested.path.read_bytes()
+            chart = build_chart_from_audio(
+                audio_bytes=audio_bytes,
+                filename=ingested.path.name,
+                difficulty=req.difficulty,
+                audio_source="youtube",
+                video_id=req.videoId,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("yt-dlp pipeline failed, falling back to placeholder: %s", exc)
+            chart = _hardcoded_chart(req)
+    else:
+        chart = _hardcoded_chart(req)
+
+    # Cache by both the request key (for popup re-clicks) and the audio hash
+    # (for re-use across different request shapes pointing at the same audio).
     _cache.put(content_hash=cache_key, difficulty=req.difficulty, chart=chart)
+    if chart.audio.contentHash:
+        _cache.put(content_hash=chart.audio.contentHash, difficulty=req.difficulty, chart=chart)
     return chart
 
 
@@ -112,6 +139,12 @@ async def generate_from_audio(
     if not audio_bytes:
         raise HTTPException(status_code=422, detail="empty audio upload")
 
+    # Persist to the cache dir so we can keep it for debugging and replays.
+    ingested = bytes_to_disk(audio_bytes, suffix=Path(audio.filename or "upload.wav").suffix or ".wav")
+    cached = _cache.get(content_hash=ingested.content_hash, difficulty=difficulty)
+    if cached is not None:
+        return cached
+
     try:
         chart = build_chart_from_audio(
             audio_bytes=audio_bytes,
@@ -121,7 +154,7 @@ async def generate_from_audio(
     except NotImplementedError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
 
-    _cache.put(content_hash=chart.audio.contentHash or "", difficulty=difficulty, chart=chart)
+    _cache.put(content_hash=ingested.content_hash, difficulty=difficulty, chart=chart)
     return chart
 
 
