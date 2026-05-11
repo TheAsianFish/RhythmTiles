@@ -6,7 +6,11 @@ Working name. May rename before shipping.
 
 ## Status
 
-Early development. See [PROGRESS.md](PROGRESS.md) for stage status and [PLAN.md](PLAN.md) for the full roadmap.
+Stages 0 through 4 are in place. End-to-end placeholder chart works; real librosa pipeline runs on synthetic audio. See [PROGRESS.md](PROGRESS.md) for what is done vs pending and [PLAN.md](PLAN.md) for the full roadmap.
+
+Test counts at the latest commit:
+- Backend: 24 pytest passing.
+- Extension: 27 vitest passing.
 
 ## Repo layout
 
