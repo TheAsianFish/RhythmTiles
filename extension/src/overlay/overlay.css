@@ -187,3 +187,132 @@ canvas {
   font-size: 12px;
   cursor: pointer;
 }
+
+/* Burger / back button in the header. Mirrors the existing header button
+   style but uses a slightly more prominent border so the menu affordance
+   reads as an action even when the rest of the header is quiet. */
+.header .menu-btn {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  min-width: 24px;
+  padding: 0 8px;
+}
+
+/* In-overlay menu. Covers the canvas with a dim backdrop and a centred
+   card with scrolling settings. Pointer events are enabled (the menu
+   accepts clicks) but only inside the card. */
+.menu-overlay {
+  position: absolute;
+  inset: 32px 0 0 0;
+  display: grid;
+  place-items: start center;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 6;
+  overflow-y: auto;
+}
+
+.menu-card {
+  background: #0f1218;
+  border: 1px solid #232830;
+  padding: 16px 18px;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.menu-card h2 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #c8d2e0;
+}
+
+.menu-row label {
+  flex: 1;
+}
+
+.menu-row select,
+.menu-row input[type="checkbox"] {
+  background: #1a1f28;
+  color: #f4f6f8;
+  border: 1px solid #2a3140;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.menu-row select {
+  min-width: 130px;
+}
+
+.menu-card input[type="range"] {
+  width: 100%;
+  accent-color: #5fc0ff;
+}
+
+.menu-value {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: #b8c3d3;
+  min-width: 44px;
+  text-align: right;
+}
+
+.menu-hint {
+  font-size: 11px;
+  color: #7b8493;
+  line-height: 1.35;
+}
+
+.menu-error {
+  background: rgba(180, 30, 30, 0.25);
+  color: #ffb0b0;
+  border: 1px solid rgba(255, 100, 100, 0.4);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.menu-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.menu-actions button {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f6f8;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.menu-actions button.primary {
+  background: rgba(95, 192, 255, 0.25);
+  border-color: rgba(95, 192, 255, 0.5);
+  color: #e7f5ff;
+}
+
+.menu-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

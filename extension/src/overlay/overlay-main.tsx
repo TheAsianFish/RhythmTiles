@@ -6,8 +6,15 @@ import { playHitClick, setHitVolume } from "./sfx";
 import { GameLoop } from "@/game/loop";
 import type { ClockSource } from "@/game/clock";
 import { accuracyPercent } from "@/game/scoring";
-import type { Judgment, ScoreState } from "@/game/types";
-import { loadSettings, loadBestScore, saveBestScore, DEFAULT_SETTINGS } from "@/utils/storage";
+import { hitWindowsForOD, type Judgment, type ScoreState } from "@/game/types";
+import {
+  loadSettings,
+  saveSettings,
+  loadBestScore,
+  saveBestScore,
+  DEFAULT_SETTINGS,
+  type UserSettings,
+} from "@/utils/storage";
 
 // React's useEffect fires asynchronously after paint. postMessage from the
 // parent can arrive before the listener is registered, dropping BB_LOAD_CHART.
@@ -62,6 +69,141 @@ interface ResultsPayload {
   prevBest?: { score: number; accuracy: number } | null;
 }
 
+// In-overlay menu shown when the user clicks the burger button or when a
+// new song is auto-detected. Mirrors the popup's settings UI so the player
+// can change difficulty / bindings / opacity without reloading the
+// extension. Clicking Start posts BB_REQUEST_NEW_CHART; the new chart
+// arrives via BB_LOAD_CHART and the menu auto-closes.
+function MenuPanel({
+  difficulty,
+  onDifficultyChange,
+  settings,
+  updateSetting,
+  onStart,
+  onCancel,
+  loading,
+  error,
+}: {
+  difficulty: Difficulty;
+  onDifficultyChange: (d: Difficulty) => void;
+  settings: UserSettings;
+  updateSetting: <K extends keyof UserSettings>(key: K, value: UserSettings[K]) => void;
+  onStart: () => void;
+  onCancel?: () => void;
+  loading: boolean;
+  error: string | null;
+}) {
+  const w = hitWindowsForOD(settings.overallDifficulty);
+  return (
+    <div className="menu-overlay" role="dialog" aria-label="Menu">
+      <div className="menu-card">
+        <h2>Menu</h2>
+        <div className="menu-row">
+          <label htmlFor="m-diff">Difficulty</label>
+          <select
+            id="m-diff"
+            value={difficulty}
+            onChange={(e) => onDifficultyChange(e.target.value as Difficulty)}
+          >
+            <option value="easy">Easy</option>
+            <option value="normal">Normal</option>
+            <option value="hard">Hard</option>
+            <option value="expert">Expert</option>
+          </select>
+        </div>
+
+        <div className="menu-row">
+          <label htmlFor="m-od">Timing (OD)</label>
+          <select
+            id="m-od"
+            value={settings.overallDifficulty}
+            onChange={(e) => updateSetting("overallDifficulty", Number(e.target.value))}
+          >
+            <option value={5}>Lenient (5)</option>
+            <option value={7}>Standard (7)</option>
+            <option value={8}>Challenging (8)</option>
+            <option value={9}>Strict (9)</option>
+            <option value={10}>Extreme (10)</option>
+          </select>
+        </div>
+        <div className="menu-hint">
+          MAX &plusmn;{w.max.toFixed(1)}ms, GREAT &plusmn;{w.great.toFixed(0)}ms,
+          GOOD &plusmn;{w.good.toFixed(0)}ms
+        </div>
+
+        <div className="menu-row">
+          <label htmlFor="m-speed">Note speed</label>
+          <span className="menu-value">{settings.noteSpeed.toFixed(2)}x</span>
+        </div>
+        <input
+          id="m-speed"
+          type="range"
+          min={0.5}
+          max={2.0}
+          step={0.05}
+          value={settings.noteSpeed}
+          onChange={(e) => updateSetting("noteSpeed", Number(e.target.value))}
+        />
+
+        <div className="menu-row">
+          <label htmlFor="m-op">Panel opacity</label>
+          <span className="menu-value">{Math.round(settings.opacity * 100)}%</span>
+        </div>
+        <input
+          id="m-op"
+          type="range"
+          min={0.4}
+          max={1.0}
+          step={0.05}
+          value={settings.opacity}
+          onChange={(e) => updateSetting("opacity", Number(e.target.value))}
+        />
+
+        <div className="menu-row">
+          <label htmlFor="m-sfx">Hit sound</label>
+          <input
+            id="m-sfx"
+            type="checkbox"
+            checked={settings.sfxEnabled}
+            onChange={(e) => updateSetting("sfxEnabled", e.target.checked)}
+          />
+        </div>
+
+        <div className="menu-row">
+          <label htmlFor="m-vol">Hit volume</label>
+          <span className="menu-value">{Math.round(settings.sfxVolume * 100)}%</span>
+        </div>
+        <input
+          id="m-vol"
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          disabled={!settings.sfxEnabled}
+          value={settings.sfxVolume}
+          onChange={(e) => updateSetting("sfxVolume", Number(e.target.value))}
+        />
+
+        {error && <div className="menu-error">{error}</div>}
+
+        <div className="menu-actions">
+          {onCancel && (
+            <button className="secondary" disabled={loading} onClick={onCancel}>
+              Cancel
+            </button>
+          )}
+          <button className="primary" disabled={loading} onClick={onStart}>
+            {loading ? "Generating..." : "Start"}
+          </button>
+        </div>
+        <div className="menu-hint">
+          Key bindings and calibration live in the extension popup.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<CanvasRenderer | null>(null);
@@ -75,6 +217,21 @@ function App() {
   const [chart, setChart] = useState<Chart | null>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>("normal");
   const [videoId, setVideoId] = useState<string>("");
+  // Menu mode (burger button). When open, the canvas dims and an inline
+  // settings panel is shown. Lets the user change difficulty and other
+  // settings without reloading the whole extension. The game (if any) is
+  // paused while the menu is open.
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Editable copy of UserSettings while the menu is open. Committed via
+  // saveSettings on Start; bindings/opacity/etc apply to the next loop
+  // mount (when chart re-arrives after a regenerate).
+  const [menuSettings, setMenuSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
+  // Pending difficulty selection inside the menu. Defaults to the current
+  // difficulty; on Start we send this to the content script which re-fetches
+  // the chart and posts BB_LOAD_CHART back.
+  const [menuDifficulty, setMenuDifficulty] = useState<Difficulty>("normal");
+  // True between "user clicked Start in menu" and "new chart arrived".
+  const [menuLoading, setMenuLoading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
   // Countdown state: null when no countdown is active, 3/2/1/0 (GO!) otherwise.
@@ -179,10 +336,26 @@ function App() {
           }
           setErrorMsg(null);
           setStatusMsg("Chart received, starting game...");
+          const incomingDifficulty = (m.difficulty as Difficulty) || "normal";
           setChart(m.chart as Chart);
-          setDifficulty((m.difficulty as Difficulty) || "normal");
+          setDifficulty(incomingDifficulty);
+          setMenuDifficulty(incomingDifficulty);
           setVideoId(m.videoId as string);
           setChartReady(true);
+          // Close the menu if it was open waiting for this fetch. Reset the
+          // ever-played flag so the first play (post-load) skips the auto
+          // countdown (the initial start, not a resume).
+          setMenuOpen(false);
+          setMenuLoading(false);
+          everPlayedRef.current = false;
+          break;
+        }
+        case "BB_CHART_ERROR": {
+          // Posted by the content script when a chart fetch (initial or
+          // menu-driven regenerate) fails. Show the error inside the menu
+          // so the user can adjust settings and retry.
+          setMenuLoading(false);
+          setErrorMsg((m.error as string) || "Chart generation failed.");
           break;
         }
         case "BB_VIDEO_PAUSED":
@@ -418,6 +591,48 @@ function App() {
     window.parent.postMessage({ type: "BB_OVERLAY_CLOSE" }, "*");
   }
 
+  async function openMenu() {
+    // Pause the underlying video and the game loop. Snapshot the current
+    // settings into the menu's editable copy so the user sees the same
+    // values the next loop mount would pick up.
+    cancelCountdown();
+    window.parent.postMessage({ type: "BB_REQUEST_VIDEO_PAUSE" }, "*");
+    const s = await loadSettings();
+    setMenuSettings(s);
+    setMenuDifficulty(difficulty);
+    setErrorMsg(null);
+    setMenuOpen(true);
+  }
+
+  function closeMenuWithoutApplying() {
+    // Cancel button on the menu. Re-applying mid-game without a regenerate
+    // is fine if the user only twiddled visual settings (opacity, sfx);
+    // those pick up on the next loop mount. If they changed bindings,
+    // they'll need to actually click Start to apply. Keep this behaviour
+    // simple: close and resume; the visual settings persist via storage.
+    setMenuOpen(false);
+    setErrorMsg(null);
+  }
+
+  async function startFromMenu() {
+    // Persist edited settings, then ask the content script to (re)fetch the
+    // chart at the chosen difficulty. The new chart arrives via BB_LOAD_CHART
+    // which closes the menu and sets up the loop. The first BB_VIDEO_PLAYING
+    // for the fresh chart skips the countdown (initial start, not resume),
+    // matching the popup's Start Game flow.
+    await saveSettings(menuSettings);
+    setMenuLoading(true);
+    setErrorMsg(null);
+    window.parent.postMessage(
+      { type: "BB_REQUEST_NEW_CHART", difficulty: menuDifficulty },
+      "*",
+    );
+  }
+
+  function updateMenuSetting<K extends keyof UserSettings>(key: K, value: UserSettings[K]) {
+    setMenuSettings((prev) => ({ ...prev, [key]: value }));
+  }
+
   function restart() {
     // Replay: rebuild the loop with a fresh score state, seek the video
     // back to 0, run a 3-2-1 countdown, then resume. The loop-boot
@@ -450,6 +665,14 @@ function App() {
         )}
         <div className="spacer" />
         {results && <button onClick={restart}>Replay</button>}
+        <button
+          className="menu-btn"
+          onClick={() => (menuOpen ? closeMenuWithoutApplying() : void openMenu())}
+          title={menuOpen ? "Back to game" : "Menu / settings"}
+          aria-label="Toggle menu"
+        >
+          {menuOpen ? "←" : "☰"}
+        </button>
         <button onClick={close}>Close</button>
       </div>
       <canvas ref={canvasRef} />
@@ -458,10 +681,22 @@ function App() {
           {countdown === 0 ? "GO!" : countdown}
         </div>
       )}
-      {!chartReady && !errorMsg && (
+      {!chartReady && !errorMsg && !menuOpen && (
         <div className="banner">{statusMsg}</div>
       )}
-      {errorMsg && <div className="banner err">{errorMsg}</div>}
+      {errorMsg && !menuOpen && <div className="banner err">{errorMsg}</div>}
+      {menuOpen && (
+        <MenuPanel
+          difficulty={menuDifficulty}
+          onDifficultyChange={setMenuDifficulty}
+          settings={menuSettings}
+          updateSetting={updateMenuSetting}
+          onStart={() => void startFromMenu()}
+          onCancel={chartReady ? closeMenuWithoutApplying : undefined}
+          loading={menuLoading}
+          error={errorMsg}
+        />
+      )}
       {results && (
         <div className="results">
           <div className="results-card">

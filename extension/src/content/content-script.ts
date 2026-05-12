@@ -270,6 +270,62 @@ function detachNavigationWatch(): void {
   }
 }
 
+// Re-fetch a chart for the currently-active video at a new difficulty,
+// then post it to the existing overlay iframe. Used by the in-overlay
+// menu's Start button and by the SPA-navigation auto-restart. Pauses
+// the video for the duration of the fetch so audio doesn't run ahead.
+async function regenerateChart(difficulty: Difficulty): Promise<void> {
+  const iframe = overlay;
+  if (!iframe) return;
+  if (!videoEl) videoEl = findVideoElement();
+  if (!videoEl) {
+    iframe.contentWindow?.postMessage(
+      { type: "BB_CHART_ERROR", error: "No video element on page" }, "*",
+    );
+    return;
+  }
+  const videoId = getVideoId();
+  if (!videoId) {
+    iframe.contentWindow?.postMessage(
+      { type: "BB_CHART_ERROR", error: "Could not parse videoId from URL" }, "*",
+    );
+    return;
+  }
+  try { videoEl.pause(); } catch { /* ignore */ }
+  // Refresh the lane bindings snapshot (the user may have rebound keys in
+  // the menu). The page-level interceptor reads this set on every keydown.
+  const settings = await loadSettings();
+  boundCodes = new Set(settings.bindings);
+  attachKeyCapture();
+  const duration = isFinite(videoEl.duration) ? videoEl.duration : undefined;
+  let chart: Chart;
+  try {
+    chart = await generateChart({ videoId, difficulty, duration });
+  } catch (e) {
+    iframe.contentWindow?.postMessage(
+      { type: "BB_CHART_ERROR", error: (e as Error).message }, "*",
+    );
+    return;
+  }
+  if (isPlaceholderChart(chart)) {
+    iframe.contentWindow?.postMessage(
+      {
+        type: "BB_CHART_ERROR",
+        error:
+          "Backend returned the 20-note demo chart. Real audio generation is " +
+          "disabled or failed. Restart the backend with BACKEND_ALLOW_YTDLP=1.",
+      },
+      "*",
+    );
+    return;
+  }
+  activeDifficulty = difficulty;
+  activeVideoId = videoId;
+  iframe.contentWindow?.postMessage(
+    { type: "BB_LOAD_CHART", chart, videoId, difficulty }, "*",
+  );
+}
+
 function startClockBridge() {
   if (clockInterval !== null) clearInterval(clockInterval);
   clockInterval = window.setInterval(() => {
@@ -471,5 +527,15 @@ window.addEventListener("message", (ev) => {
         videoEl.currentTime = Math.max(0, Number(msg.t) || 0);
       } catch { /* ignore */ }
       break;
+    case "BB_REQUEST_NEW_CHART": {
+      // Posted by the overlay's in-game menu when the user clicks Start
+      // after changing difficulty (or simply confirming the same one).
+      // Re-fetch the chart for the current videoId at the chosen
+      // difficulty and post it back as BB_LOAD_CHART. The overlay closes
+      // its menu and rebuilds the loop when the new chart arrives.
+      const newDifficulty = (msg.difficulty as Difficulty) || activeDifficulty || "normal";
+      void regenerateChart(newDifficulty);
+      break;
+    }
   }
 });
