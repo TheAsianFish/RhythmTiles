@@ -2,6 +2,87 @@
 
 Append-only log of decisions that shape the project. Each entry records the date, the question, the choice, and why.
 
+## 2026-05-11: Six-tier judgment system with OD-based windows
+
+**Question:** What hit-window scheme do we use?
+
+**Choice:** osu!mania v1 formulas. Six tiers: max, great, good, ok, meh, miss.
+
+| Tier | Base score | Window |
+|---|---|---|
+| MAX | 300 | ±16.5 ms (fixed) |
+| GREAT | 300 | ±(64 - 3·OD) ms |
+| GOOD | 200 | ±(97 - 3·OD) ms |
+| OK | 100 | ±(127 - 3·OD) ms |
+| MEH | 50 | ±(151 - 3·OD) ms |
+| MISS | 0 | anything outside ±(188 - 3·OD) |
+
+**Why:** the user explicitly asked for stricter timing; the four-tier system
+was too forgiving. OD-based formulas give us one knob (5..10) that controls
+the whole tier spread. Default OD=8 is roughly "challenging" (great window
+~40ms). User-tunable from the popup.
+
+**Revisit when:** playtesting on a real device suggests a different curve, or
+if we add a "no-fail" mode where windows widen mid-song after misses.
+
+## 2026-05-11: Combo-multiplied scoring (osu!-style)
+
+**Question:** How does the score accumulate?
+
+**Choice:** `score += baseValue × combo`. Each non-miss increments combo by 1.
+A miss resets combo to 0.
+
+**Why:** the user requested osu! scoring. With this formula, a clean run
+grows the score quadratically with note count, which makes long chains
+disproportionately valuable. This rewards consistency more than raw note
+count, which is the whole point of a rhythm game.
+
+**Revisit when:** if it makes scoring hard to read at extreme combos, we can
+display in K/M units, but the math stays the same.
+
+## 2026-05-11: Chord notes (planned, not yet built)
+
+**Question:** Should two-note chords (simultaneous keys) be supported?
+
+**Choice:** Plan it now, build it later. The data model already supports it
+(multiple `Note` entries can share the same `t` value with different lanes).
+The game loop, input capture, and hit detection all scope by lane, so two
+same-`t` notes "just work" as a chord without changes.
+
+What's missing:
+1. The lane assigner picks one lane per onset today; for chord support it
+   would split "strong" onsets (top-quantile onset_strength) into two notes
+   across the band split (e.g. one low-band lane + one high-band lane).
+2. The canvas renderer doesn't visually link chord notes; could add a faint
+   horizontal connector so the player sees the chord at a glance.
+
+Tracked in `extension/src/game/types.ts` NoteRuntime docstring and
+`docs/PIPELINE.md` "Future: chord notes".
+
+## 2026-05-11: yt-dlp + bundled ffmpeg for real chart generation
+
+**Question:** Do we depend on a system ffmpeg install?
+
+**Choice:** No. We use `imageio-ffmpeg`, which is pip-installable and ships a
+platform-native ffmpeg binary. yt-dlp gets the path via `--ffmpeg-location`.
+
+**Why:** the user shouldn't have to install ffmpeg system-wide. One
+`pip install '.[ytdlp]'` covers both yt-dlp and ffmpeg.
+
+## 2026-05-11: Lane balance via median centroid
+
+**Question:** How do we route onsets to lanes 0-1 vs 2-3?
+
+**Choice:** Use the MEDIAN spectral centroid across the song as the split.
+
+**Why:** a fixed 1500 Hz cutoff put 99% of pop-song onsets above the cutoff
+(verified on Rick Astley: 1091/1093 onsets had centroid > 1500 Hz). Lanes
+0-1 were nearly empty. Splitting at the median guarantees ~50/50 across the
+band, so all four lanes get used regardless of genre.
+
+**Revisit when:** we add stems (Demucs); drum stems would route directly to
+lane mapping based on instrument rather than band, which is more musical.
+
 ## 2026-05-11: Tab capture vs videoId+yt-dlp
 
 **Question:** How does the backend get the audio it needs to analyze?
