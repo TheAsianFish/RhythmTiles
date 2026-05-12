@@ -6,7 +6,7 @@
 //  - inject the overlay iframe and post the chart to it
 //  - keep the overlay's clock fed from the page's <video>.currentTime
 
-import { generateChart, BackendError, isPlaceholderChart } from "@/api/backend-client";
+import { generateChart, isPlaceholderChart } from "@/api/backend-client";
 import type { Chart, Difficulty } from "@/types/chart";
 import { loadSettings } from "@/utils/storage";
 
@@ -221,8 +221,12 @@ async function startGame(difficulty: Difficulty) {
       pipelineVersion: chart.metadata.pipelineVersion,
     });
   } catch (e) {
-    const msg = e instanceof BackendError ? e.message : (e as Error).message;
+    const msg = (e as Error).message;
     console.warn("[BeatBridge] chart generation failed:", msg);
+    // Tear down the key capture we installed above. Otherwise lane keys
+    // (and YouTube's own k/f shortcuts on the same codes) stay swallowed
+    // by the page-level listener with no overlay to forward to.
+    detachKeyCapture();
     return { ok: false, error: `chart generation failed: ${msg}` };
   }
 
@@ -232,6 +236,7 @@ async function startGame(difficulty: Difficulty) {
       "disabled or failed. Restart the backend with BACKEND_ALLOW_YTDLP=1, " +
       "or check the backend terminal for an error trace.";
     console.warn("[BeatBridge]", msg);
+    detachKeyCapture();
     return { ok: false, error: msg };
   }
 
