@@ -89,11 +89,19 @@ export class GameLoop {
     this.offsetMs = ms;
   }
 
-  start(target: Document | Window = window) {
+  start(target: Document | Window = window, opts: { startPaused?: boolean } = {}) {
     if (this.running) return;
     this.running = true;
     this.capture.attach(target);
     this.unsubscribeInput = this.capture.subscribe((ev) => this.handleInput(ev));
+    // startPaused defers the first tick. Used by the replay flow so the
+    // loop doesn't synchronously fire onFinish reading a stale end-of-
+    // song clock before the video seek to 0 has completed. The caller
+    // resumes via resume() once the seek confirms.
+    if (opts.startPaused) {
+      this.isPaused = true;
+      return;
+    }
     this.tick();
   }
 

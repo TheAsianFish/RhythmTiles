@@ -613,22 +613,28 @@ function App() {
           },
         },
       });
-      loop.start(window);
+      // Replay path: start the loop PAUSED so its first tick doesn't fire
+      // synchronously against the stale end-of-song clock (which would mark
+      // every note missed and re-fire onFinish, painting the results card
+      // back on top of the fresh replay). The countdown's resume() at the
+      // end of 3-2-1 starts the rAF for real.
+      const isReplay = pendingReplayRef.current;
+      loop.start(window, { startPaused: isReplay });
       loopRef.current = loop;
 
-      // Replay sequence: this is a re-mount triggered by the Replay button.
-      // Pause the video, seek to 0, then run the countdown over the fresh
-      // loop. We schedule the seek + countdown after a tick so the loop's
-      // input listeners are fully attached before any video events ricochet.
-      if (pendingReplayRef.current) {
+      if (isReplay) {
         pendingReplayRef.current = false;
-        everPlayedRef.current = true; // ensure the play() at end of countdown doesn't skip it
+        everPlayedRef.current = true; // ensure the play() at end of countdown does not skip it
+        // Defensive: also reset cursor/notes/score against gameMs=0 so even
+        // if a stray BB_CLOCK_TICK with the stale value sneaks in, the loop
+        // is in a clean state.
+        loop.seekToVideoTime(0);
         window.setTimeout(() => {
           if (cancelled) return;
           window.parent.postMessage({ type: "BB_REQUEST_VIDEO_SEEK", t: 0 }, "*");
-          // scheduleCountdown pauses the video, ticks 3-2-1, and plays.
-          // We pause/seek first so the player doesn't briefly hear audio
-          // from the previous play position while the countdown spins up.
+          // scheduleCountdown pauses the video (no-op if already), ticks
+          // 3-2-1, plays. The play round-trip resumes the loop via the
+          // BB_VIDEO_PLAYING handler.
           window.setTimeout(() => {
             if (cancelled) return;
             scheduleCountdown();
@@ -748,6 +754,13 @@ function App() {
     setResults(null);
     setChartReady(false);
     pendingReplayRef.current = true;
+    // Force the local clock to 0 paused immediately. Without this the
+    // BridgedClock still reports the end-of-song time until the next
+    // BB_CLOCK_TICK arrives, and the new loop's first paint sees the
+    // stale value. The loop also starts paused as a belt-and-braces,
+    // but this prevents the renderer from flashing the song-end state
+    // for a frame before the pause takes effect.
+    clockRef.current.set(0, true);
     // Pause the video up front so it does not keep playing audio from the
     // previous position while the new loop spins up.
     window.parent.postMessage({ type: "BB_REQUEST_VIDEO_PAUSE" }, "*");
