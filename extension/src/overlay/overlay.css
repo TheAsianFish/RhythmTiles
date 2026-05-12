@@ -1,3 +1,5 @@
+@import "../ui/skins.css";
+
 html, body {
   /* --panel-alpha is set by overlay-main from UserSettings.opacity. Each
      rgba in the gradient is the base alpha multiplied by this scalar so the
@@ -7,14 +9,14 @@ html, body {
   padding: 0;
   width: 100%;
   height: 100%;
-  color: #f4f6f8;
+  color: var(--bb-skin-text);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   overflow: hidden;
   background: linear-gradient(
     180deg,
-    rgba(10, 12, 16, calc(0.86 * var(--panel-alpha))) 0%,
-    rgba(13, 15, 20, calc(0.74 * var(--panel-alpha))) 45%,
-    rgba(15, 18, 24, calc(0.58 * var(--panel-alpha))) 100%
+    rgba(var(--bb-skin-ov-rgb-0), calc(0.86 * var(--panel-alpha))) 0%,
+    rgba(var(--bb-skin-ov-rgb-1), calc(0.74 * var(--panel-alpha))) 45%,
+    rgba(var(--bb-skin-ov-rgb-2), calc(0.58 * var(--panel-alpha))) 100%
   );
   border-radius: 14px;
   box-shadow:
@@ -39,8 +41,8 @@ html, body {
   padding: 0 10px;
   user-select: none;
   cursor: grab;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: linear-gradient(180deg, var(--bb-skin-header-shine-top), var(--bb-skin-header-shine-bot));
+  border-bottom: 1px solid var(--bb-skin-header-line);
   flex-shrink: 0;
 }
 
@@ -55,7 +57,7 @@ html, body {
 .header .grip span {
   width: 14px;
   height: 2px;
-  background: rgba(255, 255, 255, 0.45);
+  background: var(--bb-skin-header-grip);
   border-radius: 1px;
 }
 
@@ -63,7 +65,7 @@ html, body {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.08em;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--bb-skin-title);
   text-transform: uppercase;
 }
 
@@ -76,9 +78,9 @@ html, body {
   letter-spacing: 0.10em;
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(255, 215, 0, 0.18);
-  color: rgba(255, 220, 130, 0.95);
-  border: 1px solid rgba(255, 215, 0, 0.3);
+  background: var(--bb-skin-chip-diff-bg);
+  color: var(--bb-skin-chip-diff-text);
+  border: 1px solid var(--bb-skin-chip-diff-border);
 }
 
 .header .spacer { flex: 1; }
@@ -88,7 +90,7 @@ html, body {
   padding: 0 8px;
   font-size: 11px;
   background: rgba(255, 255, 255, 0.08);
-  color: #f4f6f8;
+  color: var(--bb-skin-text);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   cursor: pointer;
@@ -108,8 +110,8 @@ canvas {
   top: 44px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(20, 24, 30, 0.85);
-  color: #f4f6f8;
+  background: var(--bb-skin-banner-bg);
+  color: var(--bb-skin-text);
   padding: 6px 12px;
   border-radius: 999px;
   font-size: 11px;
@@ -136,7 +138,7 @@ canvas {
   font-size: 88px;
   font-weight: 800;
   color: #ffffff;
-  text-shadow: 0 0 18px rgba(255, 215, 0, 0.85), 0 4px 14px rgba(0, 0, 0, 0.7);
+  text-shadow: 0 0 18px var(--bb-skin-countdown-shadow), 0 4px 14px rgba(0, 0, 0, 0.7);
   z-index: 7;
   pointer-events: none;
   animation: countdown-pop 0.7s ease-out;
@@ -153,13 +155,13 @@ canvas {
   inset: 32px 0 0 0;
   display: grid;
   place-items: center;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--bb-skin-results-scrim);
   z-index: 4;
 }
 
 .results-card {
-  background: #0f1218;
-  border: 1px solid #232830;
+  background: var(--bb-skin-elev-bg);
+  border: 1px solid var(--bb-skin-elev-border);
   padding: 22px 24px;
   border-radius: 12px;
   min-width: 260px;
@@ -168,7 +170,7 @@ canvas {
 
 .results h2 { margin: 0 0 10px; font-size: 16px; }
 .results .score { font-size: 30px; font-weight: 700; margin: 6px 0; }
-.results .row { font-size: 12px; color: #b8c3d3; }
+.results .row { font-size: 12px; color: var(--bb-skin-label); }
 .results .new-best {
   font-size: 12px;
   font-weight: 700;
@@ -180,7 +182,7 @@ canvas {
 
 .results button {
   background: rgba(255, 255, 255, 0.08);
-  color: #f4f6f8;
+  color: var(--bb-skin-text);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   padding: 6px 12px;
@@ -214,8 +216,8 @@ canvas {
 }
 
 .menu-card {
-  background: #0f1218;
-  border: 1px solid #232830;
+  background: var(--bb-skin-elev-bg);
+  border: 1px solid var(--bb-skin-elev-border);
   padding: 16px 18px;
   border-radius: 12px;
   width: 100%;
@@ -312,9 +314,9 @@ canvas {
 
 .menu-row select,
 .menu-row input[type="checkbox"] {
-  background: #1a1f28;
-  color: #f4f6f8;
-  border: 1px solid #2a3140;
+  background: var(--bb-skin-menu-select-bg);
+  color: var(--bb-skin-text);
+  border: 1px solid var(--bb-skin-menu-select-border);
   border-radius: 6px;
   padding: 4px 6px;
   font-size: 12px;
@@ -326,20 +328,20 @@ canvas {
 
 .menu-card input[type="range"] {
   width: 100%;
-  accent-color: #5fc0ff;
+  accent-color: var(--bb-skin-menu-accent);
 }
 
 .menu-value {
   font-variant-numeric: tabular-nums;
   font-size: 11px;
-  color: #b8c3d3;
+  color: var(--bb-skin-label);
   min-width: 44px;
   text-align: right;
 }
 
 .menu-hint {
   font-size: 11px;
-  color: #7b8493;
+  color: var(--bb-skin-hint);
   line-height: 1.35;
 }
 
@@ -362,7 +364,7 @@ canvas {
 
 .menu-actions button {
   background: rgba(255, 255, 255, 0.08);
-  color: #f4f6f8;
+  color: var(--bb-skin-text);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   padding: 6px 14px;
@@ -371,12 +373,37 @@ canvas {
 }
 
 .menu-actions button.primary {
-  background: rgba(95, 192, 255, 0.25);
-  border-color: rgba(95, 192, 255, 0.5);
-  color: #e7f5ff;
+  background: var(--bb-skin-menu-primary-bg-a);
+  border-color: var(--bb-skin-menu-primary-border);
+  color: var(--bb-skin-menu-primary-text);
 }
 
 .menu-actions button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Pro skin: mute backend pills to grayscale so they match washed UI. */
+:root[data-bb-skin="pro"] .mode-chip-ok {
+  background: rgba(110, 116, 128, 0.12);
+  border-color: rgba(110, 116, 128, 0.32);
+  color: #585c66;
+}
+
+:root[data-bb-skin="pro"] .mode-chip-warn {
+  background: rgba(110, 116, 128, 0.16);
+  border-color: rgba(90, 95, 108, 0.4);
+  color: #4a4d56;
+}
+
+:root[data-bb-skin="pro"] .mode-chip-error {
+  background: rgba(105, 92, 92, 0.14);
+  border-color: rgba(120, 100, 100, 0.38);
+  color: #5c4f4f;
+}
+
+:root[data-bb-skin="pro"] .mode-chip-neutral {
+  background: rgba(110, 116, 128, 0.08);
+  border-color: rgba(110, 116, 128, 0.22);
+  color: #6a6f7a;
 }

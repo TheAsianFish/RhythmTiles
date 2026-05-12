@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { computeCalibrationOffset, metronomeBeats } from "@/game/calibration";
 import { loadSettings, saveSettings } from "@/utils/storage";
+import { applyDocumentSkin } from "@/ui/apply-skin";
 
 const BPM = 120;
 const BEATS = 16;
@@ -25,6 +26,10 @@ function App() {
 
   useEffect(() => {
     loadSettings().then((s) => setSavedOffsetMs(s.audioLatencyOffsetMs));
+  }, []);
+
+  useEffect(() => {
+    void loadSettings().then((s) => applyDocumentSkin(s.skinId));
   }, []);
 
   useEffect(() => {

@@ -37,7 +37,8 @@ const HIT_FADE_MS = 220;
 // share a cool tone; lanes 1 and 2 (F, J) share a warm tone. Hand parsing
 // during streams is much easier when outer and inner lanes are visually
 // grouped vs four distinct hues. See research note in docs/DECISIONS.md.
-const LANE_COLORS = ["#5fc0ff", "#ffcc55", "#ffcc55", "#5fc0ff"];
+const DEFAULT_LANE_OUTER = "#5fc0ff";
+const DEFAULT_LANE_INNER = "#ffcc55";
 const LANE_KEYS = ["D", "F", "J", "K"];
 
 // Animation timing constants. Tuned so the eye registers each flash but they
@@ -59,7 +60,7 @@ export interface HudFrame {
   lastJudgment?: { judgment: string; deltaMs: number; atMs: number };
   pressedLanes: ReadonlySet<number>;
   // Recent hit deltas in ms. Most recent at the END of the array. Renderer
-  // shows the last ~12 as ticks on a calibration bar above the hit line.
+  // shows the last ~12 as ticks on a calibration bar below the hit line.
   recentDeltas?: ReadonlyArray<{ deltaMs: number; tier: string }>;
 }
 
@@ -99,6 +100,13 @@ function freshAnimState(): AnimState {
 export class CanvasRenderer {
   private ctx: CanvasRenderingContext2D;
   private config: RenderConfig;
+  /** Lanes 0/3 outer pair, 1/3 inner pair; synced from skins.css via --bb-lane-*. */
+  private laneColors: [string, string, string, string] = [
+    DEFAULT_LANE_OUTER,
+    DEFAULT_LANE_INNER,
+    DEFAULT_LANE_INNER,
+    DEFAULT_LANE_OUTER,
+  ];
   private anim: AnimState = freshAnimState();
 
   constructor(canvas: HTMLCanvasElement, config: Partial<RenderConfig> = {}) {
@@ -106,6 +114,16 @@ export class CanvasRenderer {
     if (!ctx) throw new Error("canvas 2d context unavailable");
     this.ctx = ctx;
     this.config = { ...DEFAULT_RENDER_CONFIG, ...config };
+    this.syncLaneColorsFromCss();
+  }
+
+  syncLaneColorsFromCss(root: Element = document.documentElement): void {
+    const cs = getComputedStyle(root);
+    let outer = cs.getPropertyValue("--bb-lane-outer").trim();
+    let inner = cs.getPropertyValue("--bb-lane-inner").trim();
+    if (!outer) outer = DEFAULT_LANE_OUTER;
+    if (!inner) inner = DEFAULT_LANE_INNER;
+    this.laneColors = [outer, inner, inner, outer];
   }
 
   setConfig(c: Partial<RenderConfig>) {
@@ -163,9 +181,9 @@ export class CanvasRenderer {
       if (sincePress < LANE_FLASH_DECAY_MS) {
         const t = 1 - sincePress / LANE_FLASH_DECAY_MS;
         const grad = ctx.createLinearGradient(0, lanesTop, 0, H);
-        grad.addColorStop(0, hexWithAlpha(LANE_COLORS[i]!, 0));
-        grad.addColorStop(0.85, hexWithAlpha(LANE_COLORS[i]!, 0.35 * t));
-        grad.addColorStop(1, hexWithAlpha(LANE_COLORS[i]!, 0.55 * t));
+        grad.addColorStop(0, hexWithAlpha(this.laneColors[i]!, 0));
+        grad.addColorStop(0.85, hexWithAlpha(this.laneColors[i]!, 0.35 * t));
+        grad.addColorStop(1, hexWithAlpha(this.laneColors[i]!, 0.55 * t));
         ctx.globalAlpha = 1.0;
         ctx.fillStyle = grad;
         ctx.fillRect(x, lanesTop, laneWidth, H - lanesTop);
@@ -215,7 +233,7 @@ export class CanvasRenderer {
         hitLineY,
         laneWidth - 6,
         c.noteHeightPx,
-        LANE_COLORS[lane]!,
+        this.laneColors[lane]!,
         fade,
       );
     }
@@ -228,7 +246,7 @@ export class CanvasRenderer {
 
       const lane = n.note.lane;
       const x = laneOriginX + lane * (laneWidth + c.laneGapPx);
-      const fill = LANE_COLORS[lane]!;
+      const fill = this.laneColors[lane]!;
 
       if (n.note.type === "hold") {
         // For an active hold, clamp the head to the hit line. Player is
@@ -279,11 +297,12 @@ export class CanvasRenderer {
     drawCombo(ctx, W - c.sideMarginPx, 18, frame.combo, this.anim, now);
 
     // Hit-delta meter near the hit line. Shows last few hit timings as ticks.
+    // Below the hit line so it doesn't sit on top of incoming notes.
     if (frame.recentDeltas && frame.recentDeltas.length > 0) {
       drawHitDeltaMeter(
         ctx,
         laneOriginX,
-        hitLineY - 50,
+        hitLineY + 50,
         totalLanesWidth,
         frame.recentDeltas,
       );

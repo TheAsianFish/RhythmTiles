@@ -2,6 +2,10 @@
 // Falls back to localStorage when running outside an extension context
 // (so unit tests don't have to mock chrome.*).
 
+import { coerceSkinId, type SkinId } from "@/ui/skins";
+
+export type { SkinId };
+
 export interface UserSettings {
   audioLatencyOffsetMs: number;   // calibration result, additive offset
   noteSpeed: number;              // pixels per second, scale factor
@@ -10,7 +14,8 @@ export interface UserSettings {
   bindings: [string, string, string, string]; // lane 0..3 -> key code
   sfxEnabled: boolean;
   sfxVolume: number;              // 0-1, gain on the hit-click synth
-  overallDifficulty: number;      // OD value for hit windows; default 8
+  overallDifficulty: number;    // OD value for hit windows; default 8
+  skinId: SkinId;                 // UI palette (CSS data-bb-skin)
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -22,9 +27,11 @@ export const DEFAULT_SETTINGS: UserSettings = {
   sfxEnabled: true,
   sfxVolume: 0.55,
   overallDifficulty: 8,
+  skinId: "midnight",
 };
 
-const SETTINGS_KEY = "beatbridge.settings";
+/** Storage key for persisted UserSettings; used by overlay storage listeners. */
+export const SETTINGS_STORAGE_KEY = "beatbridge.settings";
 const SCORES_KEY = "beatbridge.scores";
 
 type ScoreEntry = {
@@ -70,12 +77,26 @@ async function writeKey<T>(key: string, value: T): Promise<void> {
 }
 
 export async function loadSettings(): Promise<UserSettings> {
-  const partial = await readKey<Partial<UserSettings>>(SETTINGS_KEY, {});
-  return { ...DEFAULT_SETTINGS, ...partial };
+  const partial = await readKey<Partial<UserSettings>>(SETTINGS_STORAGE_KEY, {});
+  const skinId = coerceSkinId(partial.skinId);
+  return { ...DEFAULT_SETTINGS, ...partial, skinId };
 }
 
 export async function saveSettings(s: UserSettings): Promise<void> {
-  await writeKey(SETTINGS_KEY, s);
+  await writeKey(SETTINGS_STORAGE_KEY, s);
+}
+
+/** Fire when another extension page updates UserSettings (e.g. popup skin change). */
+export function subscribeSettingsChange(onChange: () => void): () => void {
+  if (typeof chrome === "undefined" || !chrome.storage?.onChanged) return () => {};
+
+  const listener: Parameters<typeof chrome.storage.onChanged.addListener>[0] = (changes, area) => {
+    if (area !== "local") return;
+    if (!(SETTINGS_STORAGE_KEY in changes)) return;
+    onChange();
+  };
+  chrome.storage.onChanged.addListener(listener);
+  return () => chrome.storage.onChanged.removeListener(listener);
 }
 
 export async function loadBestScore(

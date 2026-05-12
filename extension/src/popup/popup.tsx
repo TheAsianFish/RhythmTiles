@@ -4,6 +4,8 @@ import { backendUrl, pingHealthDetailed } from "@/api/backend-client";
 import type { Difficulty } from "@/types/chart";
 import { hitWindowsForOD } from "@/game/types";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type UserSettings } from "@/utils/storage";
+import { applyDocumentSkin } from "@/ui/apply-skin";
+import { SKIN_IDS, SKIN_LABELS } from "@/ui/skins";
 
 type BackendStatus = "unknown" | "ok" | "down";
 
@@ -117,6 +119,10 @@ function App() {
       setSettings(s);
     })();
   }, []);
+
+  useEffect(() => {
+    applyDocumentSkin(settings.skinId);
+  }, [settings.skinId]);
 
   // Persist on every change. Settings live in chrome.storage.local so the
   // overlay picks them up on next game start.
@@ -237,6 +243,23 @@ function App() {
         At OD {settings.overallDifficulty}: MAX &plusmn;{windows.max.toFixed(1)}ms, GREAT &plusmn;
         {windows.great.toFixed(0)}ms, GOOD &plusmn;{windows.good.toFixed(0)}ms, OK &plusmn;
         {windows.ok.toFixed(0)}ms, MEH &plusmn;{windows.meh.toFixed(0)}ms.
+      </div>
+
+      <div className="row">
+        <label htmlFor="skin">Appearance</label>
+        <select
+          id="skin"
+          value={settings.skinId}
+          onChange={(e) =>
+            void update({ skinId: e.target.value as UserSettings["skinId"] })
+          }
+        >
+          {SKIN_IDS.map((id) => (
+            <option key={id} value={id}>
+              {SKIN_LABELS[id]}
+            </option>
+          ))}
+        </select>
       </div>
 
       <button className="primary" onClick={onStart} disabled={busy || status === "down"}>
