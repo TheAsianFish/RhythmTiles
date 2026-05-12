@@ -103,4 +103,69 @@ describe("accuracyPercent", () => {
     const expected = ((200 / 300) + (100 / 300) + (50 / 300)) / 4 * 100;
     expect(accuracyPercent(s)).toBeCloseTo(expected, 1);
   });
+
+  // osu! accuracy formula: total score value / max possible score value.
+  // A single hit of value V over a one-note song yields V/300 * 100% acc.
+  it("single 300 (max or great) is exactly 100% accuracy", () => {
+    let s = emptyScoreState();
+    s = applyHit(s, { judgment: "max", deltaMs: 0, noteIndex: 0, combo: 1, scoreAwarded: 300 });
+    expect(accuracyPercent(s)).toBeCloseTo(100, 4);
+  });
+
+  it("single 100 (ok) is 33.33% accuracy", () => {
+    let s = emptyScoreState();
+    s = applyHit(s, { judgment: "ok", deltaMs: 95, noteIndex: 0, combo: 1, scoreAwarded: 100 });
+    expect(accuracyPercent(s)).toBeCloseTo(100 / 3, 4);
+  });
+
+  it("single 50 (meh) is 16.67% accuracy", () => {
+    let s = emptyScoreState();
+    s = applyHit(s, { judgment: "meh", deltaMs: 130, noteIndex: 0, combo: 1, scoreAwarded: 50 });
+    expect(accuracyPercent(s)).toBeCloseTo(50 / 3, 4);
+  });
+
+  it("single miss is 0% accuracy", () => {
+    let s = applyMiss(emptyScoreState());
+    expect(accuracyPercent(s)).toBeCloseTo(0, 4);
+  });
+
+  it("accuracy is independent of combo", () => {
+    // Same judgment counts -> same accuracy regardless of whether they were
+    // all chained or broken up by misses. Score differs (combo math) but
+    // acc must not.
+    let chained = emptyScoreState();
+    for (let c = 1; c <= 4; c++) {
+      chained = applyHit(chained, {
+        judgment: "ok",
+        deltaMs: 90,
+        noteIndex: c - 1,
+        combo: c,
+        scoreAwarded: 100,
+      });
+    }
+    let broken = emptyScoreState();
+    for (let c = 1; c <= 4; c++) {
+      broken = applyHit(broken, {
+        judgment: "ok",
+        deltaMs: 90,
+        noteIndex: c - 1,
+        combo: 1,
+        scoreAwarded: 100,
+      });
+    }
+    expect(accuracyPercent(chained)).toBeCloseTo(accuracyPercent(broken), 6);
+    expect(accuracyPercent(chained)).toBeCloseTo(100 / 3, 4);
+    expect(chained.score).not.toBe(broken.score); // score IS combo-dependent
+  });
+
+  it("matches total-value / max-possible-value identity", () => {
+    let s = emptyScoreState();
+    s = applyHit(s, { judgment: "max", deltaMs: 0, noteIndex: 0, combo: 1, scoreAwarded: 300 });
+    s = applyHit(s, { judgment: "ok", deltaMs: 90, noteIndex: 1, combo: 2, scoreAwarded: 100 });
+    s = applyHit(s, { judgment: "meh", deltaMs: 130, noteIndex: 2, combo: 3, scoreAwarded: 50 });
+    s = applyMiss(s);
+    const totalValue = 300 + 100 + 50 + 0;
+    const maxPossible = 4 * 300;
+    expect(accuracyPercent(s)).toBeCloseTo((totalValue / maxPossible) * 100, 4);
+  });
 });

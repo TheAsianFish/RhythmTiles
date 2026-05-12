@@ -69,7 +69,9 @@ export function findCandidateNote(
 }
 
 // Mark notes as missed once their start time is past the OK boundary plus
-// some slack. Returns the new cursor position.
+// some slack. Returns the new cursor position. Holds that are currently
+// being held by the player are skipped (not marked missed) so the cursor
+// doesn't strand them; the loop resolves them on release.
 export function advanceCursor(
   notes: NoteRuntime[],
   cursor: number,
@@ -80,6 +82,12 @@ export function advanceCursor(
   while (c < notes.length) {
     const n = notes[c]!;
     if (n.hit || n.missed) {
+      c++;
+      continue;
+    }
+    if (n.holding) {
+      // Skip past an active hold so subsequent notes in other lanes can be
+      // hit. The hold will resolve itself on release or hold timeout.
       c++;
       continue;
     }
@@ -120,8 +128,16 @@ export function registerPress(input: RegisterPressInput): HitResult | null {
     return null;
   }
   const note = input.notes[cand.idx]!;
-  note.hit = true;
   note.judgment = j;
+  // Holds aren't fully resolved by a head press; they enter the `holding`
+  // state and stay drawn until the player releases (or runs out of time).
+  // The loop is responsible for the head's score, this function just sets
+  // the state and reports the head judgment.
+  if (note.note.type === "hold") {
+    note.holding = true;
+  } else {
+    note.hit = true;
+  }
   const combo = input.combo + 1;
   return {
     judgment: j,

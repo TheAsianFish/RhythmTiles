@@ -93,8 +93,14 @@ export interface NoteRuntime {
   note: Note;
   startMs: number;     // note.t * 1000
   endMs: number;       // start + duration for holds, else start
+  // Final states: hit (success) and missed (failure). Mutually exclusive
+  // and set once. Notes in either state are skipped by the cursor + renderer.
   hit: boolean;
   missed: boolean;
+  // Transient state for holds only: true after the head was pressed and
+  // before the tail is released. The renderer keeps drawing the body while
+  // this is true; the loop resolves it to hit or missed on release / timeout.
+  holding: boolean;
   judgment?: Judgment;
 }
 
@@ -102,6 +108,6 @@ export function noteRuntimes(notes: Note[]): NoteRuntime[] {
   return notes.map((n, i) => {
     const startMs = n.t * 1000;
     const endMs = n.type === "hold" ? startMs + (n.duration ?? 0) * 1000 : startMs;
-    return { index: i, note: n, startMs, endMs, hit: false, missed: false };
+    return { index: i, note: n, startMs, endMs, hit: false, missed: false, holding: false };
   });
 }

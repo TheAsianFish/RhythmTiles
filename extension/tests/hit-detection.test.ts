@@ -151,4 +151,49 @@ describe("registerPress", () => {
     });
     expect(result).toBeNull();
   });
+
+  it("hold press marks the note as holding, not hit", () => {
+    const runs = noteRuntimes([
+      { t: 1.0, lane: 0, type: "hold", duration: 0.5 },
+    ]);
+    const result = registerPress({
+      pressGameMs: 1000,
+      lane: 0,
+      notes: runs,
+      cursor: 0,
+      combo: 0,
+    });
+    expect(result?.judgment).toBe("max");
+    expect(runs[0].holding).toBe(true);
+    expect(runs[0].hit).toBe(false);
+    expect(runs[0].missed).toBe(false);
+  });
+
+  it("tap press still sets hit=true on the note", () => {
+    const runs = noteRuntimes([{ t: 1.0, lane: 0, type: "tap" }]);
+    registerPress({
+      pressGameMs: 1000,
+      lane: 0,
+      notes: runs,
+      cursor: 0,
+      combo: 0,
+    });
+    expect(runs[0].hit).toBe(true);
+    expect(runs[0].holding).toBe(false);
+  });
+});
+
+describe("advanceCursor with holds", () => {
+  it("does not mark an actively-held note as missed", () => {
+    const runs = noteRuntimes([
+      { t: 1.0, lane: 0, type: "hold", duration: 0.5 },
+      { t: 2.0, lane: 1, type: "tap" },
+    ]);
+    runs[0].holding = true;
+    // gameMs well past the hold's start time. Without the holding guard the
+    // cursor would mark it missed.
+    advanceCursor(runs, 0, 1800);
+    expect(runs[0].missed).toBe(false);
+    expect(runs[0].holding).toBe(true);
+  });
 });
