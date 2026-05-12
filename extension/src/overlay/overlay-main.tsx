@@ -75,18 +75,52 @@ interface ResultsPayload {
 // can change difficulty / bindings / opacity without reloading the
 // extension. Clicking Start posts BB_REQUEST_NEW_CHART; the new chart
 // arrives via BB_LOAD_CHART and the menu auto-closes.
-// Maps the backend's ml flags to a compact symbolic mode chip. Examples:
-//   ≋  baseline (librosa, no ML)
+// Maps the chip label to a CSS variant. Warning / error states get a
+// different color so the user notices they should restart the backend.
+function chipClassFor(label: string): string {
+  if (label === "Down") return "mode-chip-error";
+  if (label === "Restart needed" || label === "ML flag, inactive") return "mode-chip-warn";
+  if (label === "Checking") return "mode-chip-neutral";
+  return "mode-chip-ok";
+}
+
+// Maps the backend's reachability + ml flags to a compact symbolic mode chip.
+// Five buckets:
+//   ✕  Backend unreachable (ping failed)
+//   ⌛ Reachable but no ml field (server is from before this commit; restart
+//      to expose the indicator)
+//   ≋  Baseline (librosa, no ML)
 //   ♫  Beat This! only
 //   ♫◓ Beat This! + Demucs
-//   ⚠  flag on but package not active (silent fallback to librosa)
-//   ?  backend unreachable (we never got the ping back)
-function modeChipFor(ml: BackendMlFlags | null): { symbol: string; label: string; title: string } {
-  if (!ml) {
+//   ⚠  Flag on but package not active (silent fallback)
+function modeChipFor(
+  ml: BackendMlFlags | null,
+  reachable: boolean | null,
+): { symbol: string; label: string; title: string } {
+  if (reachable === null) {
     return {
-      symbol: "?",
-      label: "Backend ?",
+      symbol: "…",
+      label: "Checking",
+      title: "Querying /healthz to determine the active pipeline.",
+    };
+  }
+  if (!reachable) {
+    return {
+      symbol: "✕",
+      label: "Down",
       title: "Backend not reachable. Check the server is running at the configured URL.",
+    };
+  }
+  if (!ml) {
+    // Server responded but didn't include the ml block. This is the
+    // pre-mode-indicator build of the backend. The chip explicitly says
+    // "restart" so the user knows what to do.
+    return {
+      symbol: "⌛",
+      label: "Restart needed",
+      title:
+        "Backend is reachable but is running an older build that doesn't expose its ML " +
+        "flags. Restart uvicorn to enable the live mode indicator.",
     };
   }
   const beat = ml.beatThisActive;
@@ -104,7 +138,7 @@ function modeChipFor(ml: BackendMlFlags | null): { symbol: string; label: string
       symbol: "♫◓",
       label: "ML-full",
       title:
-        "Beat This! beats and downbeats + Demucs per-stem onsets. Drum line on left hand, vocal melody on right.",
+        "Beat This! beats + downbeats + Demucs per-stem onsets. Drum line on left hand, vocal melody on right.",
     };
   }
   if (beat) {
@@ -140,6 +174,7 @@ function MenuPanel({
   loading,
   error,
   backendMl,
+  backendReachable,
 }: {
   difficulty: Difficulty;
   onDifficultyChange: (d: Difficulty) => void;
@@ -150,15 +185,20 @@ function MenuPanel({
   loading: boolean;
   error: string | null;
   backendMl: BackendMlFlags | null;
+  backendReachable: boolean | null;
 }) {
   const w = hitWindowsForOD(settings.overallDifficulty);
-  const mode = modeChipFor(backendMl);
+  const mode = modeChipFor(backendMl, backendReachable);
   return (
     <div className="menu-overlay" role="dialog" aria-label="Menu">
       <div className="menu-card">
         <div className="menu-card-header">
           <h2>Menu</h2>
-          <div className="mode-chip" title={mode.title} aria-label={mode.title}>
+          <div
+            className={`mode-chip ${chipClassFor(mode.label)}`}
+            title={mode.title}
+            aria-label={mode.title}
+          >
             <span className="mode-chip-sym">{mode.symbol}</span>
             <span className="mode-chip-label">{mode.label}</span>
           </div>
@@ -300,6 +340,9 @@ function App() {
   // Snapshot of the backend's active ML flags, fetched when the menu opens.
   // null while the request is in flight or if the backend is unreachable.
   const [backendMl, setBackendMl] = useState<BackendMlFlags | null>(null);
+  // Reachability separate from ml info, so the chip can distinguish
+  // "backend down" from "backend up but older build with no ml field".
+  const [backendReachable, setBackendReachable] = useState<boolean | null>(null);
   const [dragging, setDragging] = useState(false);
   const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
   // Countdown state: null when no countdown is active, 3/2/1/0 (GO!) otherwise.
@@ -712,7 +755,9 @@ function App() {
     // Re-fetch each time we (re)show the menu so the indicator reflects
     // any flag flip the user made on the backend side since last open.
     setBackendMl(null);
+    setBackendReachable(null);
     const ping = await pingHealthDetailed();
+    setBackendReachable(ping.ok);
     setBackendMl(ping.ok && ping.ml ? ping.ml : null);
   }
 
@@ -815,6 +860,7 @@ function App() {
           loading={menuLoading}
           error={errorMsg}
           backendMl={backendMl}
+          backendReachable={backendReachable}
         />
       )}
       {results && (

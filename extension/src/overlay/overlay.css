@@ -250,14 +250,40 @@ canvas {
   gap: 4px;
   padding: 2px 7px;
   border-radius: 999px;
-  background: rgba(95, 192, 255, 0.14);
-  border: 1px solid rgba(95, 192, 255, 0.35);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  color: #cfe9ff;
   cursor: help;
   user-select: none;
+  border: 1px solid transparent;
+}
+
+/* Normal "ok" variant: backend reachable and an ml mode is known. */
+.mode-chip-ok {
+  background: rgba(95, 192, 255, 0.14);
+  border-color: rgba(95, 192, 255, 0.35);
+  color: #cfe9ff;
+}
+
+/* Warning: backend up but mode unknown / fallback in play. Amber. */
+.mode-chip-warn {
+  background: rgba(255, 192, 80, 0.18);
+  border-color: rgba(255, 192, 80, 0.45);
+  color: #ffe1a8;
+}
+
+/* Error: backend unreachable entirely. Red. */
+.mode-chip-error {
+  background: rgba(255, 120, 120, 0.2);
+  border-color: rgba(255, 120, 120, 0.45);
+  color: #ffc0c0;
+}
+
+/* Neutral: waiting on the first ping. Grey. */
+.mode-chip-neutral {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #c8d2e0;
 }
 
 .mode-chip-sym {
