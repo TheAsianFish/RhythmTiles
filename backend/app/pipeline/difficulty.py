@@ -5,9 +5,12 @@ Targets (notes per beat):
   normal: ~1.5
   hard:   ~2.5 (cap)
 
-Approach: if density is over target, drop the lowest-strength-equivalent notes
-(here we proxy strength with isolation, since onset strength is dropped at
-lane_assign time). If under target, leave it alone; we don't fabricate hits.
+Approach: greedy spacing-aware decimation. We pick the minimum gap between
+kept notes from the target density, walk notes in order, and keep one if the
+gap is satisfied. A note whose lane differs from the previous kept note can
+slot in at a tighter gap so we preserve lane variety (the previous stride
+implementation collapsed alternating lanes into a single-lane chain on stride
+2, which is the worst-case pattern for a 4-lane game).
 """
 
 from __future__ import annotations
@@ -22,6 +25,10 @@ _DENSITY_TARGETS = {
     "hard": 2.5,
 }
 
+# How close to min_gap a different-lane note can sneak in. 0.6 keeps the
+# combined density close to target while breaking up same-lane chains.
+_LANE_VARIETY_FACTOR = 0.6
+
 
 def shape_difficulty(
     *,
@@ -33,7 +40,7 @@ def shape_difficulty(
         return notes
     target = _DENSITY_TARGETS.get(difficulty, 1.5)
     if not beats or len(beats) < 2:
-        return notes  # Without a beat reference we can't shape sensibly.
+        return notes
 
     avg_beat_period = (beats[-1] - beats[0]) / max(len(beats) - 1, 1)
     if avg_beat_period <= 0:
@@ -46,10 +53,23 @@ def shape_difficulty(
     if current_density <= target * 1.05:
         return notes
 
-    keep_ratio = target / current_density
-    keep_every = max(1, int(round(1 / max(keep_ratio, 1e-3))))
-    # Stride-keep: keep every Nth note. Cheap, deterministic, preserves structure.
-    return [n for i, n in enumerate(notes) if i % keep_every == 0]
+    min_gap = avg_beat_period / target  # seconds between hits at target density
+    tight_gap = min_gap * _LANE_VARIETY_FACTOR
+
+    kept: list[RawNote] = []
+    last_t = -1e9
+    last_lane = -1
+    for n in notes:
+        gap = n.t - last_t
+        if gap >= min_gap:
+            kept.append(n)
+            last_t = n.t
+            last_lane = n.lane
+        elif n.lane != last_lane and gap >= tight_gap:
+            kept.append(n)
+            last_t = n.t
+            last_lane = n.lane
+    return kept
 
 
 def target_density(difficulty: str) -> float:
