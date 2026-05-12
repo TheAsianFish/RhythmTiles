@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Chart, Difficulty } from "@/types/chart";
 import { CanvasRenderer, DEFAULT_RENDER_CONFIG } from "./canvas-renderer";
-import { playHitClick } from "./sfx";
+import { playHitClick, setHitVolume } from "./sfx";
 import { GameLoop } from "@/game/loop";
 import type { ClockSource } from "@/game/clock";
 import { accuracyPercent } from "@/game/scoring";
@@ -207,13 +207,15 @@ function App() {
       const settings = (await loadSettings()) ?? DEFAULT_SETTINGS;
       if (cancelled) return;
 
-      // Apply panel opacity (CSS variable, see overlay.css) and note speed
-      // scaling on the renderer. The renderer's pixelsPerMs is a base value
-      // that we multiply by the user's noteSpeed preference.
+      // Apply panel opacity (CSS variable, see overlay.css), note speed
+      // scaling on the renderer, and the hit-sound gain. These come from
+      // chrome.storage.local on every game start so a popup change picks
+      // up on the next play without an explicit reload.
       document.documentElement.style.setProperty("--panel-alpha", String(settings.opacity));
       rendererRef.current?.setConfig({
         pixelsPerMs: DEFAULT_RENDER_CONFIG.pixelsPerMs * settings.noteSpeed,
       });
+      setHitVolume(settings.sfxVolume);
 
       // Load previous best so the results screen can show "new best!" if we beat it.
       const prevBest = videoId ? await loadBestScore(videoId, difficulty) : null;

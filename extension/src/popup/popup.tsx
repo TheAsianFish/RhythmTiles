@@ -215,6 +215,7 @@ function App() {
           <option value="easy">Easy</option>
           <option value="normal">Normal</option>
           <option value="hard">Hard</option>
+          <option value="expert">Expert</option>
         </select>
       </div>
 
@@ -326,6 +327,21 @@ function App() {
               onChange={(e) => void update({ sfxEnabled: e.target.checked })}
             />
           </div>
+
+          <div className="row">
+            <label htmlFor="sfx-volume">Hit volume</label>
+            <span className="value">{Math.round(settings.sfxVolume * 100)}%</span>
+          </div>
+          <input
+            id="sfx-volume"
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            disabled={!settings.sfxEnabled}
+            value={settings.sfxVolume}
+            onChange={(e) => void update({ sfxVolume: Number(e.target.value) })}
+          />
 
           <button
             type="button"

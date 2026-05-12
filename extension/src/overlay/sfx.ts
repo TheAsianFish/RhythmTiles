@@ -4,12 +4,26 @@
 // gesture, which is enough to satisfy the policy when ctx.resume() runs).
 
 const CLICK_DURATION_S = 0.035;
-const CLICK_GAIN = 0.10;        // ~10% volume so it sits under the music
+// Runtime-tunable gain. Defaults loud enough to clearly punctuate hits but
+// not louder than typical music levels. The popup's volume slider calls
+// setHitVolume to change this without rebuilding.
+const DEFAULT_CLICK_GAIN = 0.40;
 const CLICK_DECAY_S = 0.006;    // sharp, percussive envelope
 
 let ctx: AudioContext | null = null;
 let clickBuffer: AudioBuffer | null = null;
 let lastClickAt = 0;
+let currentGain = DEFAULT_CLICK_GAIN;
+
+/**
+ * Set the hit-click gain (0.0 silent, 1.0 full). Values outside the range
+ * are clamped. Persists across calls. Called from overlay-main with the
+ * stored UserSettings.sfxVolume at game start.
+ */
+export function setHitVolume(v: number): void {
+  if (Number.isNaN(v)) return;
+  currentGain = Math.max(0, Math.min(1, v));
+}
 
 // Cap consecutive click rate to avoid clipping when several notes hit at
 // once. Two presses within MIN_INTERVAL_MS still play, but a stream of
@@ -32,7 +46,7 @@ export function playHitClick(): void {
   const src = audioCtx.createBufferSource();
   src.buffer = buffer;
   const gain = audioCtx.createGain();
-  gain.gain.value = CLICK_GAIN;
+  gain.gain.value = currentGain;
   src.connect(gain).connect(audioCtx.destination);
   src.start();
 }
