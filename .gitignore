@@ -12,6 +12,7 @@ env/
 .ruff_cache/
 *.egg-info/
 dist/
+!extension/dist/
 build/
 
 # Node
@@ -22,7 +23,6 @@ node_modules/
 .vite/
 
 # Build artifacts
-extension/dist/
 extension/build/
 backend/dist/
 

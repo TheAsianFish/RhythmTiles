@@ -12,6 +12,10 @@ npm run build
 Then open `chrome://extensions`, flip developer mode on, click "Load
 unpacked", and pick `extension/dist`.
 
+The repo includes a committed `dist/` so another machine can clone and load
+unpacked without installing Node. After you change extension source, run
+`npm run build` and commit the updated `dist/` if you want that build tracked.
+
 For active dev:
 
 ```powershell
