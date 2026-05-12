@@ -1,193 +1,329 @@
 # ML Plan (architecture only — do not execute yet)
 
 This document is the agreed plan for bringing ML into BeatBridge. It is
-deliberately not implemented in code; the goal here is to make sure that
-when we commit time to ML, it pays off and doesn't regress the heuristic
-baseline.
+deliberately not implemented in code; the goal is to make sure that
+when we commit time to ML, it pays off and doesn't regress the
+heuristic baseline.
 
 ## Status
 
 Not started. Stubs exist at `backend/app/ml/`. The heuristic pipeline
-under `backend/app/pipeline/` remains the production path.
+under `backend/app/pipeline/` remains the production path. Research
+pass on current music ML models is captured below; concrete model
+choices are recommended per phase.
+
+## Honest reframe from research
+
+The instinct "ML for chart generation = polyphonic transcription" is
+WRONG for this project. Two reasons surfaced by research:
+
+1. **Polyphonic transcription on YouTube audio underperforms.** Basic
+   Pitch's frame accuracy drops on dense pop mixes (~63% on vocals,
+   worse on full-band). MT3 is JAX/T5X-only and shows real-audio
+   regressions in published evals. Turning every song into a MIDI
+   piano roll makes mania charts feel like a different game.
+2. **Lane assignment is genuinely unsolved by ML.** No off-the-shelf
+   model produces rhythm-game lane assignments. Even Mapperatorinator
+   (the only direct "audio → osu! tokens" model published, Whisper-
+   based, ~219M params) is reported by the osu! community itself as
+   "not a replacement for mappers." Rule-based assignment on stem-
+   labeled onsets is what shipped community charts effectively use.
+
+The biggest no-pushback quality jump available right now is replacing
+`librosa.beat.beat_track` with **Beat This!** (CPJKU, ISMIR 2024). It
+is SOTA F1 on beat + downbeat detection, pip-installable, tens of MB,
+and a drop-in functional replacement.
+
+Sources: [Beat This! repo](https://github.com/CPJKU/beat_this),
+[2025 AMT Challenge](https://ai4musicians.org/transcription/2025transcription.html),
+[Spotify Basic Pitch engineering blog](https://engineering.atspotify.com/2022/6/meet-basic-pitch),
+[Mapperatorinator](https://github.com/OliBomby/Mapperatorinator),
+[osu! community thread on AI beatmaps](https://osu.ppy.sh/community/forums/topics/1899264).
 
 ## Why ML now
 
-The heuristic pipeline has hit two ceilings:
+The heuristic pipeline has hit two real ceilings:
 
-1. **Polyphonic events.** We cannot tell a single loud note from a
-   simultaneous chord without polyphonic transcription. The centroid-
-   aware merge gets close on adjacent-pitch events 20-30ms apart but
-   misses truly simultaneous chord strikes.
+1. **Beat-grid quality on tempo-shifting songs.** librosa.beat is good
+   at steady-tempo pop but stumbles on tempo curves and on
+   non-percussive-driven music. Beat This! fixes this.
+2. **Section detection by RMS alone is crude.** Chorus vs verse vs
+   bridge classification from full-mix RMS misses obvious cases
+   (vocal-driven choruses with quiet drums). MERT embeddings or
+   stem-aware energy curves would do this properly.
 
-2. **Lane-assignment quality.** The current rule-based assigner
-   (centroid band + hand balance) is fine but predictable. A human
-   mapper would route specific instruments to specific lanes in ways
-   we can't easily codify (kick on outer-left, snare on outer-right,
-   hat alternating inner) — but a model trained on community charts
-   could learn this.
-
-Both ceilings genuinely require ML. The heuristic version is "good
-enough to play"; ML is the path to "feels hand-mapped."
+Polyphonic transcription is *not* on this list. The research convinced
+me that going to MIDI-style per-pitch events would hurt mania feel.
 
 ## Goals
 
-- **Match hand-mapped feel.** Per-note granularity on dense polyphonic
-  sections. Lane choices that respect instrument identity.
-- **Preserve the 60s cold-start / 2s warm budgets.** Either model
-  inference fits or we accept higher cold-start with stronger caching.
-- **Keep the heuristic pipeline as the rollback.** Every ML module is
-  gated behind an env flag and falls back to the heuristic if it errors
-  or isn't installed (same pattern as the existing Demucs scaffold).
+- **Beat grid accuracy** at parity with hand-mapped charts.
+- **Section detection** that distinguishes chorus from verse on songs
+  the current RMS-based logic misclassifies.
+- **Per-stem onset detection** so drum hits drive lanes 0/3 and vocal
+  attacks drive 1/2 naturally, instead of all signal coming from the
+  full mix's spectral centroid.
+- **Preserve the 60s cold-start / 2s warm budgets** — model warmup is
+  the long tail risk; budget +30s grace.
+- **Heuristic pipeline stays the rollback.** Every ML module is gated
+  behind an env flag and falls back to the heuristic on error / not
+  installed (same pattern as the existing Demucs scaffold).
 
 ## Non-goals (v1)
 
-- Real-time inference on the user's machine. All ML runs server-side.
-- Full end-to-end "audio → osu!mania chart" model. We compose smaller
-  models, each replacing a specific heuristic stage.
-- Self-trained models for everything. We use pretrained models off-the-
-  shelf wherever possible. Training is reserved for the lane-assignment
-  classifier where pretrained models don't exist.
+- **Polyphonic transcription** (Basic Pitch, MT3, etc.). Research
+  pushed back: dense pop audio underperforms and the output reframes
+  the game incorrectly. Reconsider only if a specific failure case
+  surfaces that the per-stem onset pipeline can't address.
+- **End-to-end audio → chart model** (Mapperatorinator and the like).
+  Community feedback indicates it doesn't replace mappers; we'd
+  inherit its baked-in style choices we can't tune.
+- **On-device inference.** All ML runs server-side.
+- **madmom dependency.** It's effectively unmaintained on Python 3.10+
+  ([beat_this issue #9](https://github.com/CPJKU/beat_this/issues/9),
+  [Snyk advisor](https://snyk.io/advisor/python/madmom)). Hard avoid.
 
 ## Phased plan
 
-Each phase is independently shippable and gated behind its own env flag.
-A phase only progresses when the previous one is validated against the
-heuristic baseline.
+Each phase is independently shippable, env-flag-gated, and rollback-
+safe. A phase only progresses when the previous one passes validation.
 
-### Phase 1: Activate source separation (Demucs)
+---
 
-**Status:** scaffolded behind `USE_DEMUCS=1`; needs real activation +
-validation.
+### Phase 1: Beat This! upgrade (highest priority)
 
-**What changes:** onset detection runs on the drum stem (already wired);
-add separate paths for vocal-stem onset detection and bass-stem energy
-curve for chorus detection.
+**What changes.** Replace `app/pipeline/beat_track.py`'s
+`librosa.beat.beat_track` call with Beat This! inference. Returns
+beats AND downbeats (we don't have downbeat detection today). Drop in
+behind a `USE_BEAT_THIS=1` env flag; falls back to librosa when off.
 
-**Models considered:** _(filled by research findings)_
+**Model.** [CPJKU/beat_this](https://github.com/CPJKU/beat_this).
+Pure neural, no DBN post-processing. License: MIT. Weights tens of
+MB. CPU is borderline-realtime; GPU comfortable.
 
-**Choice + rationale:** _(filled by research findings)_
+**Why first.** Research called this the single biggest jump for
+"hand-mapped feel" because the whole chart's musicality is anchored
+to the beat grid. Every other stage (subdivision, density bucketing,
+beat-fill, snap-to-beat) compounds beat-grid errors. Fixing the root
+fixes everything downstream.
 
-**Validation:** generate the same song heuristic-vs-Demucs side by side,
-listen with verify_sync. Pass if Demucs produces cleaner onset times on
-3 of 4 vocal-heavy test tracks.
+**New capability unlocked.** Downbeat detection lets us:
+- Tag the bpmCurve field with a tempo curve, not just a single bpm.
+- Emit "accent" chord stacks on actual downbeats instead of
+  guessing from strength quantile + centroid.
+- Use measure boundaries for difficulty pacing (verses on the and-
+  count, choruses on the downbeat).
 
-**Latency cost:** _(filled by research findings)_
+**Latency cost.** First call: model load ~3-5s + ~1-3s inference on
+a 4-minute song (CPU). Warm: <1s. Cache the beat output by audio
+hash; reuse on chart regeneration.
 
-**Rollback:** flip USE_DEMUCS=0. Pipeline falls back to full-mix onsets.
+**Validation.**
+- Synthetic click-track test: Beat This! BPM within 2% of ground
+  truth on 120/140/172/95 BPM tracks.
+- Hand-tap A/B: tap to 5 real songs; Beat This! deltas < 30ms on
+  4 of 5. librosa baseline today: ~80ms on tempo-shifting tracks.
+- No regression on `tests/test_pipeline_synth.py`.
 
-### Phase 2: Polyphonic transcription
+**Rollback.** `USE_BEAT_THIS=0`. Fall back to librosa.
 
-**What changes:** replace heuristic onset detection on the vocal/melody
-stem with a polyphonic transcriber that returns (time, pitch, duration)
-events. Onset times become more precise; lane assignment can use pitch
-to route by melodic contour.
+**Effort.** ~2 days. Install, wrap the call, threading dropout
+handling, cache integration.
 
-**Models considered:** _(filled by research findings)_
+---
 
-**Choice + rationale:** _(filled by research findings)_
+### Phase 2: Activate Demucs (already scaffolded)
 
-**Validation:** chord-rate stays in target band (3-8%) but more chord
-events are real polyphonic strikes rather than detection coincidences.
-A/B against Phase 1 baseline on 5 songs across genres.
+**What changes.** Flip `USE_DEMUCS=1` from "scaffolded path that
+no-ops" to "real htdemucs_ft inference." onset detection routes to
+the drum stem (already wired); add vocal stem for melody onsets.
 
-**Latency cost:** _(filled by research findings)_
+**Model.** htdemucs_ft (Demucs v4 fine-tuned variant) via the
+`demucs` pip package. MIT license, ~80MB weights, auto-download on
+first call.
+[GitHub](https://github.com/facebookresearch/demucs)
 
-**Rollback:** flag-gated. Falls back to Phase 1 onset detection.
+**Why second.** Research recommended this paired with Beat This! as
+the no-regret combo. Drum-stem onsets give cleaner kick/snare
+timing than the full-mix multi-onset path. Vocal-stem onsets fix the
+remaining vocal-pickup gaps that HPSS doesn't fully cover.
 
-### Phase 3: Learned lane assignment
+**Considered alternatives:**
+- BS-RoFormer (2 dB better SDR than Demucs but no clean pip package,
+  weights community-distributed with unclear license).
+- Mel-RoFormer (similar to BS-RoFormer).
+- Spleeter (older, lighter, but worse SDR than Demucs).
+[BS-RoFormer paper](https://arxiv.org/abs/2310.01809),
+[2026 benchmark](https://dev.to/codesugar_lin_037a57b06a4/htdemucs-vs-bs-roformer-vs-spleeter-a-2026-audio-source-separation-benchmark-2ll8)
 
-**What changes:** replace the rule-based `lane_assign.py` with a
-classifier trained on osu!mania community charts. Each candidate note
-gets features (audio centroid, pitch from Phase 2, beat position, local
-density, stem source from Phase 1) and the model predicts the lane.
+**Latency cost.** CPU: ~0.1x realtime (4-minute song = ~3 minutes).
+GPU: ~3x realtime (~15s on RTX 3060 Ti). Aggressive caching mandatory.
 
-**Models considered:** small gradient-boosted decision trees (xgboost),
-2-layer MLP, transformer-encoder over the local-window of notes.
+**Storage cost.** ~80MB model + cached stems per song. Stems can be
+discarded after onset extraction; only the cached onset list needs
+to persist.
 
-**Choice (provisional):** gradient boost first (interpretable,
-fast inference, doesn't need GPU). Transformer if GB caps out.
+**Validation.**
+- A/B chart generation on 5 songs of varied genre. Listen with
+  `verify_sync`; Demucs onsets feel cleaner on 3 of 5 vocal-heavy.
+- Chord-rate stays in target band (3-8%).
+- Cold start: +15-30s acceptable on GPU; defer to async stem job on
+  CPU-only deploy.
 
-**Training data:** osu!mania Ranked + Approved + Loved charts. Licensed
-under Creative Commons. Pipeline: download from `osu!`'s public Beatmap
-listing API, render each chart's audio via the bundled .osu + .mp3
-files, extract per-note features, save as Parquet.
+**Rollback.** `USE_DEMUCS=0`. Pipeline falls back to full-mix +
+HPSS onsets.
 
-**Validation:**
-- Hold-out 20% of charts as test set; model accuracy must beat
-  rule-based assignment on lane-prediction (target: 65%+ exact match).
-- Subjective playtest: 5 songs at "expert" tier with model lanes vs
-  rule-based lanes. Players prefer model in 3 of 5 blind comparisons.
+**Effort.** ~3 days. Real Demucs wiring (the scaffold is a stub),
+cold-start cache layer, per-stem onset detection paths.
 
-**Rollback:** flag-gated. Falls back to Phase 2 onset times + rule-based
-lane assignment.
+---
 
-**Effort:** multi-week. Data collection + training + serving. Don't
-start until Phase 1 and 2 are stable.
+### Phase 3: MERT for section detection
 
-### Phase 4 (future): End-to-end model
+**What changes.** Replace the RMS-based energy bucketing in
+`app/pipeline/chart_builder.py:_energy_buckets_for_notes` with MERT
+embeddings of the audio. Cluster embeddings to label sections (intro,
+verse, chorus, bridge, outro). Use labels to drive density variation
+more precisely than RMS quantile.
 
-Reserved for after Phase 3 is shipped and validated. Would replace the
-entire `chart_builder.py` pipeline with an audio → chart transformer.
-Probably not worth attempting until we have user-rating data to use as
-the training signal. Stage 6 territory.
+**Model.** [MERT-v1-95M](https://huggingface.co/m-a-p/MERT-v1-95M)
+or 330M variant. CC-BY-NC (verify if commercial). HuBERT-style.
+1024-d embeddings.
+[MERT paper](https://arxiv.org/abs/2306.00107)
+
+**Why third.** Energy curves miss vocal-driven choruses with quiet
+drums. MERT embeddings encode musical structure (genre, mood,
+section) and segmenting them produces real section labels. Phase 2's
+stems also help here (vocal-stem energy is the cleanest chorus proxy
+on vocal-led music).
+
+**Latency cost.** ~380MB model load (~5s warmup), then ~0.5s for a
+4-minute song on CPU. Faster on GPU. Embeddings cache by audio hash.
+
+**Validation.**
+- Manual section labels on 3 test songs (intro/verse/chorus/etc.
+  with timestamps). MERT clustering must match >70% by time.
+- Chart density variation in choruses must be visibly higher than
+  verses on songs that currently fail the RMS-only check.
+
+**Rollback.** Flag-gated; falls back to RMS bucketing.
+
+**Effort.** ~5 days. MERT integration (HF Hub, `trust_remote_code`),
+clustering + label assignment, integration into density bucket logic.
+
+---
+
+### Phase 4 (deferred): polyphonic transcription
+
+Not planned. Research recommended AGAINST. Reopen only if a specific
+song-class emerges that Phase 1-3 can't handle. The condition for
+reopening: a real song where the per-stem-onset path consistently
+fails on polyphonic events the player expects.
+
+If we reopen, candidates would be:
+- Basic Pitch (light, ONNX, but flops on dense pop)
+- MT3 (heavy, JAX-only, real-audio regression)
+- An MT3 fine-tune on mania charts (multi-week effort)
+
+---
+
+### Phase 5 (deferred): learned lane assignment
+
+Not planned. Research confirmed no off-the-shelf model exists.
+Mapperatorinator's tokens are mania-specific but community-reported
+to underperform human mappers.
+
+If we reopen later: gradient boost classifier on osu!mania community
+chart features (audio centroid, pitch contour, beat position, local
+density, stem source). Training data: osu! Ranked + Approved maps,
+CC-licensed.
+
+Effort: 3-6 weeks. Defer until Phase 1-3 are stable and the
+remaining quality gap is provably lane-assignment-shaped (not beat-
+grid or section-detection-shaped).
+
+---
+
+## Validation methodology (locked)
+
+The heuristic baseline must not regress at any phase. Every ML
+addition runs in parallel for one phase before replacing.
+
+Per-phase A/B:
+1. **Sync drift.** `verify_sync` produces `mix.wav` with click on
+   each note. Listener A/B picks the better-synced mix on 3 songs
+   across 5 listeners. Phase must win 3 of 5.
+2. **Chord rate.** Stays in 3-8% target band.
+3. **Note count.** Within ±15% of heuristic baseline at each
+   difficulty.
+4. **Cold-start time.** Must not exceed 90s on the test box (60s
+   target, 50% slack for ML overhead).
+5. **Cached-generation time.** Unchanged (cache downstream of ML).
+
+Add to `app/tools/`:
+- `bench_ml_phase.py` runs the validation checklist for each phase
+  across the test-song corpus and prints pass/fail per criterion.
 
 ## Data + licensing
 
-- **Demucs**: MIT license; weights downloadable via the `demucs` package.
-- **Basic Pitch / MT3 / Onsets+Frames**: _(filled by research)_
-- **osu!mania community charts**: Creative Commons (CC BY-NC for most
-  ranked maps, check per-map). Audio extracted from `.osz` archives.
-  Storage: ~10K charts at ~30MB each = ~300GB. Use a subset (~1K) for
-  initial training; expand if model underfits.
-
-## Validation methodology
-
-The heuristic baseline must not regress. Every ML addition runs in
-parallel with the heuristic for a phase before replacing. Compare:
-
-1. **Sync drift**: `verify_sync` tool generates `mix.wav` with clicks at
-   each note time. ML and heuristic both produce a mix; a blind A/B
-   listening test (3 songs, 5 listeners) picks the better-synced one.
-2. **Note count**: should stay within ±15% of the heuristic baseline at
-   each difficulty.
-3. **Chord rate**: should stay within 3-8% target band.
-4. **Cold-start time**: must not exceed 90s on the test box (was 60s
-   target, allow 50% slack for ML overhead).
-5. **Cached-generation time**: unchanged (cache is downstream of ML).
+- **Demucs** (Phase 2): MIT license; weights from `demucs` pip
+  package on first inference.
+- **Beat This!** (Phase 1): MIT license; weights via the GitHub repo
+  release artifacts. Pin the commit.
+- **MERT** (Phase 3): CC-BY-NC. Acceptable for non-commercial demo
+  but flag for relicensing review before shipping commercial.
+- **osu!mania charts** (Phase 5 only): CC-BY-NC for ranked maps.
+  Honor per-chart terms. Defer data collection until Phase 5 is
+  approved.
+- **Audio rights.** Demucs MIT covers the *code*, not the audio we
+  feed it. The "user's-tab-audio-not-redistribution" stance in
+  CLAUDE.md is correct; preserve it.
 
 ## Risks + mitigations
 
 | Risk | Mitigation |
 |---|---|
-| Models that look great in papers flop on real YouTube audio | Validate each on 5+ real songs before committing |
-| Cold-start budget blown | Cache stems + transcriptions per audio hash, just like charts |
-| License issues on osu!mania charts | Use ranked maps only; honor per-chart CC terms; cite contributors |
-| GPU required at scale | Phase 1 + Phase 2 chosen for CPU viability; Phase 3 is the GPU question |
-| Model output is worse than heuristic | A/B testing required at each phase; rollback flag preserved |
-| Drift in upstream model APIs (HF, package updates) | Pin versions; vendor where critical |
+| Models flop on real YouTube audio (Basic Pitch precedent) | Validate each on ≥5 real songs before committing; rollback flag preserved per phase |
+| Cold-start budget blown | Per-audio-hash cache for stems, beats, embeddings; pre-warm Modal containers |
+| GPU required at scale | Phases 1+2+3 chosen for CPU-feasibility; GPU optional accelerator |
+| License surprises (BS-RoFormer, MERT-NC) | Stick to MIT/Apache for v1; relicense MERT before shipping commercial |
+| madmom transitive dep | Avoid madmom entirely; only Beat This! and direct librosa allowed |
+| Model API drift (HF, package updates) | Pin all model versions / commit hashes; vendor critical code |
+| ONNX/TRT export reduces inference cost but adds dev cost | Skip in v1; revisit when deploy hosting is fixed and per-call cost is known |
 
-## Open decisions
-
-These need answers before Phase 1 starts:
+## Open decisions (need answers before Phase 1 starts)
 
 1. **Where does inference run?** Local GPU box, Modal, Replicate, or
-   something else? Affects cold-start latency assumptions.
-2. **Stem caching key**: by audio hash (canonical) or by videoId
-   (faster but doesn't survive re-uploads)?
-3. **Per-stem onset detection**: run on all four stems and merge, or
-   only drums + vocals?
-4. **Polyphonic transcription strictness**: emit every detected note,
-   or filter by confidence? Confidence cutoff is a chord-rate knob.
+   self-hosted? Affects cold-start latency assumptions and recurring
+   cost.
+2. **Async or sync chart generation?** Demucs at CPU is too slow for
+   sync; we'd need a 2-stage UX (chart "ready in 30s, here's a
+   loading screen") if no GPU.
+3. **Cache key**: audio content hash (canonical, survives YouTube
+   re-encodes) or videoId (fast, no audio re-fetch)? Lean toward both
+   keys pointing at the same chart.
+4. **Per-stem onset detection**: drums + vocals only, or all four
+   stems merged? Affects compute cost in Phase 2.
+5. **MERT 95M or 330M?** 95M fits in 380MB / fast inference; 330M is
+   1.3GB / slower but stronger embeddings. Default to 95M unless
+   section detection underperforms.
 
 ## Effort estimate (revisit at each phase)
 
-| Phase | Effort | Latency cost | Quality jump |
-|---|---|---|---|
-| 1: Demucs | ~2 days (already scaffolded) | +5-15s cold start | Medium |
-| 2: Transcription | ~3-5 days | +5-30s cold start | Large for polyphonic |
-| 3: Lane model | 2-4 weeks (data + training + serving) | <1s inference | Medium-large |
-| 4: End-to-end | Reserved | Unknown | Unknown |
+| Phase | Effort | Latency cost (cold) | Quality jump | Risk |
+|---|---|---|---|---|
+| 1: Beat This! | ~2 days | +5-10s | Large (rhythm anchor) | Low |
+| 2: Demucs activate | ~3 days | +15-30s (GPU) / +180s (CPU) | Medium-large | Medium (latency) |
+| 3: MERT sections | ~5 days | +5-10s | Medium | Low |
+| 4: Transcription | DEFERRED | +20-60s | Probably negative | High |
+| 5: Lane model | DEFERRED | <1s inference, weeks training | Medium-large | High (data, training) |
 
 ## Decision log (filled as decisions land)
 
-- _(empty)_
+- _2026-05-12 — Polyphonic transcription DEFERRED based on research
+  showing Basic Pitch dense-pop regressions and MT3 real-audio
+  underperformance. Reopen only on specific failure case._
+- _2026-05-12 — madmom DECLINED as a dep due to Python 3.10+
+  maintenance status._
+- _2026-05-12 — Beat This! CHOSEN as Phase 1 over librosa upgrade or
+  BeatNet, based on ISMIR 2024 SOTA results and clean pip integration._
