@@ -9,11 +9,15 @@ const CLICK_DURATION_S = 0.045;
 // change this without rebuilding.
 const DEFAULT_CLICK_GAIN = 0.40;
 // Osu!mania normal-hitnormal: a short tonal tick around 1.8kHz with a fast
-// noise transient at the front. Tuned by ear against the stock skin.
+// noise transient at the front, plus a brief low-frequency body for "tap"
+// feel. Tuned by ear against the stock skin.
 const TICK_FREQ_HZ = 1800;
 const TICK_DECAY_S = 0.012;
 const NOISE_DECAY_S = 0.004;
-const NOISE_MIX = 0.35;
+const NOISE_MIX = 0.50;
+const BODY_FREQ_HZ = 320;
+const BODY_DECAY_S = 0.005;
+const BODY_MIX = 0.30;
 
 let ctx: AudioContext | null = null;
 let clickBuffer: AudioBuffer | null = null;
@@ -76,20 +80,25 @@ function ensureClickBuffer(audioCtx: AudioContext): AudioBuffer {
   const length = Math.floor(sr * CLICK_DURATION_S);
   const buf = audioCtx.createBuffer(1, length, sr);
   const data = buf.getChannelData(0);
-  // Damped sine tick + very short noise transient at the front. The tonal
-  // tick gives the recognizable osu!mania pitch, the noise gives it the
-  // initial snap. Both share i=0 as t=0 and decay exponentially.
-  const omega = 2 * Math.PI * TICK_FREQ_HZ;
+  // Damped sine tick + short noise transient + brief low body. Tick gives
+  // the recognizable osu!mania pitch, noise gives the initial snap, body
+  // adds a faint thump so the click reads as tactile rather than purely
+  // tonal. All three share i=0 as t=0 and decay exponentially.
+  const omegaTick = 2 * Math.PI * TICK_FREQ_HZ;
+  const omegaBody = 2 * Math.PI * BODY_FREQ_HZ;
   const tickDecaySamples = Math.max(1, sr * TICK_DECAY_S);
   const noiseDecaySamples = Math.max(1, sr * NOISE_DECAY_S);
+  const bodyDecaySamples = Math.max(1, sr * BODY_DECAY_S);
   let peak = 0;
   for (let i = 0; i < length; i++) {
     const t = i / sr;
     const tickEnv = Math.exp(-i / tickDecaySamples);
     const noiseEnv = Math.exp(-i / noiseDecaySamples);
-    const tick = Math.sin(omega * t) * tickEnv;
+    const bodyEnv = Math.exp(-i / bodyDecaySamples);
+    const tick = Math.sin(omegaTick * t) * tickEnv;
     const noise = (Math.random() * 2 - 1) * noiseEnv * NOISE_MIX;
-    const v = tick + noise;
+    const body = Math.sin(omegaBody * t) * bodyEnv * BODY_MIX;
+    const v = tick + noise + body;
     data[i] = v;
     if (Math.abs(v) > peak) peak = Math.abs(v);
   }

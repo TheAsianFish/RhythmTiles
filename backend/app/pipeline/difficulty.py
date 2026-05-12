@@ -38,11 +38,16 @@ _DENSITY_TARGETS = {
 # Bands picked to feel right for typical pop/rock at ~120-180 BPM. Tune
 # with playtest data, or replace this dict with an ML-learned function
 # of (song features -> target rate) once we have replay ratings.
+# Normal and Hard raised so vocal syllables and on-beat instrument hits
+# survive selectivity instead of being thinned to a sparse skeleton. Expert
+# nudged up slightly so it stays above Hard's new ceiling. Bumped again to
+# preserve more single-note coverage of vocal syllables and melodic ramps on
+# Normal/Hard; Expert gets a modest lift so the tier ordering still holds.
 TARGET_NOTES_PER_SEC = {
     "easy":   (0.7, 1.5),
-    "normal": (1.5, 2.8),
-    "hard":   (3.0, 4.5),
-    "expert": (4.5, 6.5),
+    "normal": (3.0, 4.5),
+    "hard":   (5.0, 6.8),
+    "expert": (5.8, 7.6),
 }
 
 # Absolute bounds on the derived ratio so degenerate inputs (tiny or huge

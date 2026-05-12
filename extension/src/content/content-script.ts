@@ -32,6 +32,18 @@ let videoEl: HTMLVideoElement | null = null;
 // presses don't pile duplicates onto the same element.
 let videoListeners: Array<{ type: string; fn: EventListener }> = [];
 
+// Last-confirmed-running game, used by the SPA-navigation watcher to decide
+// whether to auto-restart for the next video. Both are set when startGame
+// succeeds and cleared by removeOverlay().
+let activeDifficulty: Difficulty | null = null;
+let activeVideoId: string | null = null;
+// Navigation watch state. YouTube fires `yt-navigate-finish` on its document
+// after each SPA route, but we also poll `location.href` because that event
+// has historically been unreliable across YouTube redesigns.
+let lastSeenHref = location.href;
+let navPollInterval: number | null = null;
+let ytNavListener: (() => void) | null = null;
+
 // Lane bindings snapshot taken on startGame. Used to decide which keys to
 // intercept at the document level before YouTube's player gets them.
 let boundCodes: Set<string> = new Set();
@@ -191,6 +203,71 @@ function removeOverlay() {
   }
   detachVideoListeners();
   detachKeyCapture();
+  detachNavigationWatch();
+  activeDifficulty = null;
+  activeVideoId = null;
+}
+
+function isWatchUrl(): boolean {
+  return location.pathname === "/watch";
+}
+
+// Called when YouTube navigates between videos in the same tab (autoplay
+// queue, suggested-video click, prev/next, channel page → video). The user
+// asked for the game to recompute automatically without reloading the
+// extension; tear down the current game and re-run startGame with the same
+// difficulty for the new videoId. The video is paused for the duration of
+// chart generation so autoplay doesn't burn through the first verse.
+async function handleNavigationChange(): Promise<void> {
+  if (!activeDifficulty || !overlay) return;
+  const newVideoId = getVideoId();
+  if (newVideoId === activeVideoId) return;
+  console.log("[BeatBridge] SPA navigation detected", {
+    from: activeVideoId, to: newVideoId, href: location.href,
+  });
+  const diff = activeDifficulty;
+  // Snapshot and pause the new video element NOW (before tearing down) so
+  // autoplay can't start playing audio we have no chart for yet.
+  const incomingVideo = findVideoElement();
+  try { incomingVideo?.pause(); } catch { /* ignore */ }
+  removeOverlay();
+  if (!isWatchUrl() || !newVideoId) return;
+  // Give YouTube a tick to finish swapping <video> internals before we
+  // re-resolve duration and request a chart.
+  await new Promise((r) => setTimeout(r, 350));
+  console.log("[BeatBridge] auto-restarting game for new videoId", newVideoId);
+  const res = await startGame(diff);
+  if (!res.ok) {
+    console.warn("[BeatBridge] auto-restart failed:", res.error);
+    return;
+  }
+  // Chart is loaded and overlay is mounted. Resume playback; the first
+  // BB_VIDEO_PLAYING for a fresh chart bypasses the countdown, so the song
+  // starts immediately alongside the game.
+  try { videoEl?.play().catch(() => {}); } catch { /* ignore */ }
+}
+
+function attachNavigationWatch(): void {
+  if (ytNavListener || navPollInterval !== null) return;
+  ytNavListener = () => { void handleNavigationChange(); };
+  document.addEventListener("yt-navigate-finish", ytNavListener);
+  lastSeenHref = location.href;
+  navPollInterval = window.setInterval(() => {
+    if (location.href === lastSeenHref) return;
+    lastSeenHref = location.href;
+    void handleNavigationChange();
+  }, 500);
+}
+
+function detachNavigationWatch(): void {
+  if (ytNavListener) {
+    document.removeEventListener("yt-navigate-finish", ytNavListener);
+    ytNavListener = null;
+  }
+  if (navPollInterval !== null) {
+    clearInterval(navPollInterval);
+    navPollInterval = null;
+  }
 }
 
 function startClockBridge() {
@@ -306,6 +383,14 @@ async function startGame(difficulty: Difficulty) {
   ];
 
   startClockBridge();
+
+  // Remember the running game so the SPA-navigation watcher can auto-restart
+  // when YouTube switches videos. Attach the watcher last so it can't fire
+  // mid-setup against stale state.
+  activeDifficulty = difficulty;
+  activeVideoId = videoId;
+  lastSeenHref = location.href;
+  attachNavigationWatch();
   return { ok: true };
 }
 
