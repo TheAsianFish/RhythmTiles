@@ -3,17 +3,89 @@ import { createRoot } from "react-dom/client";
 import { backendUrl, pingHealthDetailed } from "@/api/backend-client";
 import type { Difficulty } from "@/types/chart";
 import { hitWindowsForOD } from "@/game/types";
-import { loadSettings, saveSettings } from "@/utils/storage";
+import { DEFAULT_SETTINGS, loadSettings, saveSettings, type UserSettings } from "@/utils/storage";
 
 type BackendStatus = "unknown" | "ok" | "down";
+
+// Render a KeyboardEvent.code as a short display label. e.g. "KeyD" -> "D",
+// "Semicolon" -> ";", "Space" -> "Space". Falls back to the raw code.
+function codeToLabel(code: string): string {
+  if (code.startsWith("Key")) return code.slice(3);
+  if (code.startsWith("Digit")) return code.slice(5);
+  if (code.startsWith("Arrow")) return code.slice(5);
+  const map: Record<string, string> = {
+    Semicolon: ";",
+    Quote: "'",
+    Comma: ",",
+    Period: ".",
+    Slash: "/",
+    Backslash: "\\",
+    BracketLeft: "[",
+    BracketRight: "]",
+    Minus: "-",
+    Equal: "=",
+    Space: "Space",
+    Tab: "Tab",
+    Enter: "Enter",
+    ShiftLeft: "LShift",
+    ShiftRight: "RShift",
+    ControlLeft: "LCtrl",
+    ControlRight: "RCtrl",
+    AltLeft: "LAlt",
+    AltRight: "RAlt",
+  };
+  return map[code] ?? code;
+}
+
+function KeyCapture({
+  value,
+  onChange,
+  conflict,
+}: {
+  value: string;
+  onChange: (code: string) => void;
+  conflict: boolean;
+}) {
+  const [capturing, setCapturing] = useState(false);
+  useEffect(() => {
+    if (!capturing) return;
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.code === "Escape") {
+        setCapturing(false);
+        return;
+      }
+      onChange(e.code);
+      setCapturing(false);
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true } as any);
+  }, [capturing, onChange]);
+
+  const cls = ["keycap"];
+  if (capturing) cls.push("capturing");
+  if (conflict) cls.push("conflict");
+  return (
+    <button
+      type="button"
+      className={cls.join(" ")}
+      onClick={() => setCapturing((c) => !c)}
+      title={conflict ? "Duplicate binding" : "Click then press a key"}
+    >
+      {capturing ? "Press..." : codeToLabel(value)}
+    </button>
+  );
+}
 
 function App() {
   const [status, setStatus] = useState<BackendStatus>("unknown");
   const [healthError, setHealthError] = useState<string | null>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>("normal");
-  const [od, setOD] = useState<number>(8);
+  const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   // Keep a ref so the interval callback can read the latest status without
   // being in the effect deps (which would cause an infinite re-run loop).
   const statusRef = useRef<BackendStatus>("unknown");
@@ -31,10 +103,6 @@ function App() {
 
   useEffect(() => {
     void refreshHealth();
-    // Re-check while the popup is open so the user doesn't get stuck on
-    // a stale "down" if they boot the server after opening the popup.
-    // statusRef avoids including status in the deps, which would cause
-    // refreshHealth to be called on every state change and loop forever.
     const id = window.setInterval(() => {
       if (statusRef.current !== "ok") void refreshHealth();
     }, 3000);
@@ -42,20 +110,37 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshHealth]);
 
-  // Load persisted OD setting on open; persist on change.
+  // Load persisted settings on open.
   useEffect(() => {
     void (async () => {
       const s = await loadSettings();
-      setOD(s.overallDifficulty);
+      setSettings(s);
     })();
   }, []);
-  async function updateOD(next: number) {
-    setOD(next);
-    const s = await loadSettings();
-    await saveSettings({ ...s, overallDifficulty: next });
+
+  // Persist on every change. Settings live in chrome.storage.local so the
+  // overlay picks them up on next game start.
+  const update = useCallback(async (patch: Partial<UserSettings>) => {
+    setSettings((prev) => {
+      const next = { ...prev, ...patch };
+      void saveSettings(next);
+      return next;
+    });
+  }, []);
+
+  function setBinding(idx: 0 | 1 | 2 | 3, code: string) {
+    const next: [string, string, string, string] = [...settings.bindings] as [
+      string,
+      string,
+      string,
+      string,
+    ];
+    next[idx] = code;
+    void update({ bindings: next });
   }
 
-  const windows = hitWindowsForOD(od);
+  const conflicts = findConflicts(settings.bindings);
+  const windows = hitWindowsForOD(settings.overallDifficulty);
 
   async function onStart() {
     setBusy(true);
@@ -71,16 +156,12 @@ function App() {
         return;
       }
 
-      // Try sending the message. If the content script isn't injected yet
-      // (tab was open before the extension loaded), inject it first then retry.
       let resp = await trySendStart(tab.id, difficulty);
       if (resp === null) {
-        // Content script not present - inject it now.
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           files: ["content-script.js"],
         });
-        // Give the script a moment to register its listener.
         await new Promise((r) => setTimeout(r, 150));
         resp = await trySendStart(tab.id, difficulty);
       }
@@ -141,8 +222,8 @@ function App() {
         <label htmlFor="od">Timing strictness (OD)</label>
         <select
           id="od"
-          value={od}
-          onChange={(e) => void updateOD(Number(e.target.value))}
+          value={settings.overallDifficulty}
+          onChange={(e) => void update({ overallDifficulty: Number(e.target.value) })}
         >
           <option value={5}>Lenient (OD 5)</option>
           <option value={7}>Standard (OD 7)</option>
@@ -152,9 +233,9 @@ function App() {
         </select>
       </div>
       <div className="hint" style={{ marginTop: -8 }}>
-        At OD {od}: MAX &plusmn;{windows.max.toFixed(1)}ms, GREAT &plusmn;{windows.great.toFixed(0)}ms,
-        GOOD &plusmn;{windows.good.toFixed(0)}ms, OK &plusmn;{windows.ok.toFixed(0)}ms,
-        MEH &plusmn;{windows.meh.toFixed(0)}ms.
+        At OD {settings.overallDifficulty}: MAX &plusmn;{windows.max.toFixed(1)}ms, GREAT &plusmn;
+        {windows.great.toFixed(0)}ms, GOOD &plusmn;{windows.good.toFixed(0)}ms, OK &plusmn;
+        {windows.ok.toFixed(0)}ms, MEH &plusmn;{windows.meh.toFixed(0)}ms.
       </div>
 
       <button className="primary" onClick={onStart} disabled={busy || status === "down"}>
@@ -163,14 +244,123 @@ function App() {
 
       {error && <div className="status err">{error}</div>}
 
+      <button
+        type="button"
+        className="disclosure"
+        onClick={() => setAdvancedOpen((v) => !v)}
+        aria-expanded={advancedOpen}
+      >
+        {advancedOpen ? "▾" : "▸"} Advanced settings
+      </button>
+
+      {advancedOpen && (
+        <div className="advanced">
+          <div className="row">
+            <label>Lane keys</label>
+            <div className="keycaps">
+              <KeyCapture
+                value={settings.bindings[0]}
+                onChange={(c) => setBinding(0, c)}
+                conflict={conflicts.has(0)}
+              />
+              <KeyCapture
+                value={settings.bindings[1]}
+                onChange={(c) => setBinding(1, c)}
+                conflict={conflicts.has(1)}
+              />
+              <KeyCapture
+                value={settings.bindings[2]}
+                onChange={(c) => setBinding(2, c)}
+                conflict={conflicts.has(2)}
+              />
+              <KeyCapture
+                value={settings.bindings[3]}
+                onChange={(c) => setBinding(3, c)}
+                conflict={conflicts.has(3)}
+              />
+            </div>
+          </div>
+          {conflicts.size > 0 && (
+            <div className="hint" style={{ color: "#ff9090" }}>
+              Two lanes are bound to the same key. Only the first will fire in-game.
+            </div>
+          )}
+          <div className="hint" style={{ marginTop: -4 }}>
+            Click a key, then press the new binding. Escape to cancel.
+          </div>
+
+          <div className="row">
+            <label htmlFor="speed">Note speed</label>
+            <span className="value">{settings.noteSpeed.toFixed(2)}x</span>
+          </div>
+          <input
+            id="speed"
+            type="range"
+            min={0.5}
+            max={2.0}
+            step={0.05}
+            value={settings.noteSpeed}
+            onChange={(e) => void update({ noteSpeed: Number(e.target.value) })}
+          />
+
+          <div className="row">
+            <label htmlFor="opacity">Panel opacity</label>
+            <span className="value">{Math.round(settings.opacity * 100)}%</span>
+          </div>
+          <input
+            id="opacity"
+            type="range"
+            min={0.4}
+            max={1.0}
+            step={0.05}
+            value={settings.opacity}
+            onChange={(e) => void update({ opacity: Number(e.target.value) })}
+          />
+
+          <div className="row">
+            <label htmlFor="sfx">Hit sound</label>
+            <input
+              id="sfx"
+              type="checkbox"
+              checked={settings.sfxEnabled}
+              onChange={(e) => void update({ sfxEnabled: e.target.checked })}
+            />
+          </div>
+
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void update(DEFAULT_SETTINGS)}
+            style={{ marginTop: 4 }}
+          >
+            Reset to defaults
+          </button>
+        </div>
+      )}
+
       <p className="hint">
-        Lanes: D, F, J, K. Press the matching key as a note crosses the line. The popup will close
-        when the game starts; bring focus back here to stop.
+        Press the matching key as a note crosses the line. The popup will close when the game
+        starts; bring focus back here to stop.
       </p>
 
       <button onClick={openCalibration}>Calibrate timing</button>
     </div>
   );
+}
+
+// Returns the set of lane indices whose binding is duplicated by another lane.
+function findConflicts(bindings: readonly string[]): Set<number> {
+  const seen = new Map<string, number[]>();
+  bindings.forEach((code, i) => {
+    const arr = seen.get(code);
+    if (arr) arr.push(i);
+    else seen.set(code, [i]);
+  });
+  const out = new Set<number>();
+  for (const indices of seen.values()) {
+    if (indices.length > 1) for (const i of indices) out.add(i);
+  }
+  return out;
 }
 
 function openCalibration() {
@@ -186,8 +376,6 @@ async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
   });
 }
 
-// Returns the response on success, null if the receiving end doesn't exist yet,
-// or throws on any other error.
 async function trySendStart(
   tabId: number,
   difficulty: string,
@@ -202,6 +390,9 @@ async function trySendStart(
     throw e;
   }
 }
+
+// Exported for tests.
+export { codeToLabel, findConflicts };
 
 const root = document.getElementById("root");
 if (root) createRoot(root).render(<App />);

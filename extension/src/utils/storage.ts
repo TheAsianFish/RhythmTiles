@@ -18,7 +18,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   laneWidthPx: 96,
   opacity: 0.92,
   bindings: ["KeyD", "KeyF", "KeyJ", "KeyK"],
-  sfxEnabled: false,
+  sfxEnabled: true,
   overallDifficulty: 8,
 };
 

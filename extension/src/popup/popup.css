@@ -87,3 +87,77 @@ select {
   color: #6c7686;
   line-height: 1.4;
 }
+
+.disclosure {
+  background: transparent;
+  border: none;
+  text-align: left;
+  padding: 4px 0;
+  color: #98a3b3;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.disclosure:hover { color: #f4f6f8; }
+
+.advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: #14171c;
+  border: 1px solid #23272f;
+  border-radius: 8px;
+}
+
+.advanced .value {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: #b8c3d3;
+}
+
+.keycaps {
+  display: flex;
+  gap: 6px;
+}
+
+.keycap {
+  flex: 1;
+  min-width: 36px;
+  padding: 6px 0;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  background: #1a1d22;
+  color: #f4f6f8;
+  border: 1px solid #2a2f37;
+  border-radius: 6px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.keycap:hover { background: #20242b; }
+
+.keycap.capturing {
+  background: #2a3550;
+  border-color: #4f8cff;
+  color: #b8d4ff;
+}
+
+.keycap.conflict {
+  border-color: #ff7c7c;
+  color: #ff9090;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: #4f8cff;
+}
+
+input[type="checkbox"] {
+  accent-color: #4f8cff;
+  width: 16px;
+  height: 16px;
+}
