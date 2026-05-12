@@ -29,7 +29,11 @@ export const DEFAULT_RENDER_CONFIG: RenderConfig = {
   hudReservedTopPx: 96,
 };
 
-const LANE_COLORS = ["#5fb7ff", "#a0e0ff", "#ffd28a", "#ff8aa0"];
+// Mirror-pair palette per osu!mania 4K convention. Lanes 0 and 3 (D, K)
+// share a cool tone; lanes 1 and 2 (F, J) share a warm tone. Hand parsing
+// during streams is much easier when outer and inner lanes are visually
+// grouped vs four distinct hues. See research note in docs/DECISIONS.md.
+const LANE_COLORS = ["#5fc0ff", "#ffcc55", "#ffcc55", "#5fc0ff"];
 const LANE_KEYS = ["D", "F", "J", "K"];
 
 // Animation timing constants. Tuned so the eye registers each flash but they
