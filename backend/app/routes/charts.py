@@ -33,6 +33,17 @@ logger = logging.getLogger("beatbridge.charts")
 
 _cache = ChartCache()
 
+_PLACEHOLDER_SUFFIX = "-placeholder"
+
+
+def _is_placeholder(chart: Chart) -> bool:
+    """Was this chart produced by `_hardcoded_chart`, or by the real pipeline?
+
+    The pipeline version is the single source of truth: `_hardcoded_chart`
+    appends `-placeholder` to PIPELINE_VERSION. Real charts do not.
+    """
+    return chart.metadata.pipelineVersion.endswith(_PLACEHOLDER_SUFFIX)
+
 
 def _hardcoded_chart(req: GenerateRequest) -> Chart:
     """Stage 1 placeholder: 20 evenly-spaced notes over 30 seconds.
@@ -89,9 +100,17 @@ async def generate(req: GenerateRequest) -> Chart:
 
     cache_key = req.videoId or req.audioUrl or "unknown"
     cached = _cache.get(content_hash=cache_key, difficulty=req.difficulty)
-    if cached is not None:
+    # Cached placeholders are never returned. They poison subsequent requests
+    # once the operator turns ytdlp on. We always re-generate in that case.
+    if cached is not None and not _is_placeholder(cached):
         logger.info("cache hit for %s/%s", cache_key, req.difficulty)
         return cached
+    if cached is not None:
+        logger.warning(
+            "cache had a placeholder for %s/%s; ignoring and trying real pipeline",
+            cache_key,
+            req.difficulty,
+        )
 
     if settings.allow_ytdlp and req.videoId:
         try:
@@ -105,16 +124,33 @@ async def generate(req: GenerateRequest) -> Chart:
                 video_id=req.videoId,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.exception("yt-dlp pipeline failed, falling back to placeholder: %s", exc)
+            # Loud: this is almost always the reason a player sees a 20-note
+            # chart in production. Print the full traceback to the backend
+            # terminal so it cannot be missed.
+            logger.exception(
+                "REAL PIPELINE FAILED for videoId=%s, returning 20-note placeholder. "
+                "Cause: %s",
+                req.videoId,
+                exc,
+            )
             chart = _hardcoded_chart(req)
     else:
+        if not settings.allow_ytdlp:
+            logger.warning(
+                "Returning 20-note placeholder for videoId=%s because "
+                "BACKEND_ALLOW_YTDLP is not set. Restart the backend with "
+                "BACKEND_ALLOW_YTDLP=1 to enable real chart generation.",
+                req.videoId,
+            )
         chart = _hardcoded_chart(req)
 
-    # Cache by both the request key (for popup re-clicks) and the audio hash
-    # (for re-use across different request shapes pointing at the same audio).
-    _cache.put(content_hash=cache_key, difficulty=req.difficulty, chart=chart)
-    if chart.audio.contentHash:
-        _cache.put(content_hash=chart.audio.contentHash, difficulty=req.difficulty, chart=chart)
+    # Skip cache writes for placeholders. Real charts get cached under both
+    # the request key (for popup re-clicks) and the audio hash (for re-use
+    # across request shapes pointing at the same audio).
+    if not _is_placeholder(chart):
+        _cache.put(content_hash=cache_key, difficulty=req.difficulty, chart=chart)
+        if chart.audio.contentHash:
+            _cache.put(content_hash=chart.audio.contentHash, difficulty=req.difficulty, chart=chart)
     return chart
 
 
