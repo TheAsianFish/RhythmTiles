@@ -65,6 +65,11 @@ class RawNote:
     lane: int
     type: str = "tap"
     duration: float | None = None
+    # Carried from the source Onset so the difficulty filter can rank notes
+    # by musical importance instead of by spacing alone. Default 1.0 keeps
+    # synthetic notes (e.g. tests, beat-fill) on equal footing without
+    # requiring callers to thread it through.
+    strength: float = 1.0
 
 
 def assign_lanes(
@@ -112,8 +117,8 @@ def assign_lanes(
             if low_pick is not None and high_pick is not None:
                 low_lane, low_used_preferred = low_pick
                 high_lane, high_used_preferred = high_pick
-                notes.append(RawNote(t=t_rounded, lane=low_lane, type="tap"))
-                notes.append(RawNote(t=t_rounded, lane=high_lane, type="tap"))
+                notes.append(RawNote(t=t_rounded, lane=low_lane, type="tap", strength=float(onset.strength)))
+                notes.append(RawNote(t=t_rounded, lane=high_lane, type="tap", strength=float(onset.strength)))
                 last_hit[low_lane] = onset.t
                 last_hit[high_lane] = onset.t
                 if low_used_preferred:
@@ -161,7 +166,7 @@ def assign_lanes(
                 if used_preferred:
                     high_toggle = 1 - high_toggle
 
-        notes.append(RawNote(t=t_rounded, lane=chosen, type="tap"))
+        notes.append(RawNote(t=t_rounded, lane=chosen, type="tap", strength=float(onset.strength)))
         last_hit[chosen] = onset.t
 
         chosen_hand = _HAND_OF_LANE[chosen]

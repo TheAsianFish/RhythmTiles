@@ -56,15 +56,18 @@ SUBDIV_ABSOLUTE_RMS_FLOOR = 0.005
 # before we consider the slot "already covered" and skip subdivision.
 SUBDIV_DEDUPE_S = 0.060
 
-# Per-difficulty subdivision behaviour. Easy / Normal get nothing; Hard
-# gets half-beats only; Expert gets half-beats everywhere AND quarter-beats
-# in dense sections (where the surrounding 2-beat window has at least 2
-# real onsets).
+# Per-difficulty subdivision behaviour. Subdivisions feed the difficulty
+# selector with more candidates; the selector then keeps a fraction of
+# them based on score. Reduced aggression here so the candidate pool
+# doesn't dominate and force button-mashing density.
+#  - Hard: half-beats only in dense sections (current beat already has
+#    a real onset).
+#  - Expert: half-beats freely + quarter-beats only inside crescendos.
 _SUBDIV_BY_DIFFICULTY = {
-    "easy":   {"halves": False, "quarters_in_dense": False},
-    "normal": {"halves": False, "quarters_in_dense": False},
-    "hard":   {"halves": True,  "quarters_in_dense": False},
-    "expert": {"halves": True,  "quarters_in_dense": True},
+    "easy":   {"halves_everywhere": False, "halves_in_dense": False, "quarters_in_crescendo": False},
+    "normal": {"halves_everywhere": False, "halves_in_dense": False, "quarters_in_crescendo": False},
+    "hard":   {"halves_everywhere": False, "halves_in_dense": True,  "quarters_in_crescendo": False},
+    "expert": {"halves_everywhere": True,  "halves_in_dense": True,  "quarters_in_crescendo": True},
 }
 
 # Crescendo detection. A "rising" beat-pair has RMS increase by at least this
@@ -176,8 +179,16 @@ def add_subdivision_onsets(
             and real_per_beat[i - 1] >= 1
         )
 
-        # Half-beat subdivision rule.
-        place_half = rules["halves"] or in_crescendo
+        # Half-beat subdivision rule. Three gates from least to most
+        # restrictive:
+        #  - halves_everywhere: anywhere with audio support (Expert)
+        #  - halves_in_dense:   only where surrounding beats have onsets (Hard)
+        #  - in_crescendo:      forced on rising-energy sections regardless
+        place_half = (
+            rules["halves_everywhere"]
+            or (rules["halves_in_dense"] and in_dense_section)
+            or in_crescendo
+        )
         if place_half:
             _maybe_add(
                 new_onsets,
@@ -188,8 +199,9 @@ def add_subdivision_onsets(
                 centroid=SYNTH_CENTROIDS[i % 2],
             )
 
-        # Quarter-beat subdivisions for Expert in dense sections only.
-        if rules["quarters_in_dense"] and in_dense_section:
+        # Quarter-beat subdivisions only inside crescendos for Expert.
+        # The selector + sanity cap will trim if too many land in a row.
+        if rules["quarters_in_crescendo"] and in_crescendo:
             q1 = beat_a + 0.25 * (beat_b - beat_a)
             q3 = beat_a + 0.75 * (beat_b - beat_a)
             _maybe_add(

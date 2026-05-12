@@ -216,5 +216,11 @@ def build_chart_from_audio(
             difficulty=difficulty,  # type: ignore[arg-type]
             keyMode=4,
         ),
-        notes=[Note(**n.__dict__) for n in notes],
+        # `strength` lives on RawNote for the difficulty selector but is not
+        # part of the wire-format Note; strip it before constructing the
+        # Pydantic model (which has extra="forbid").
+        notes=[
+            Note(t=n.t, lane=n.lane, type=n.type, duration=n.duration)
+            for n in notes
+        ],
     )

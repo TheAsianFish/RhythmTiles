@@ -61,24 +61,48 @@ def test_assign_lanes_drops_when_all_lanes_too_recent() -> None:
     assert len(notes) <= 4
 
 
-def test_shape_difficulty_thins_above_target() -> None:
-    # 60 notes over 10 beats = density 6.0. easy target 1.0 -> should thin hard.
-    beats = [0.0 + i * 0.5 for i in range(11)]
-    notes = [RawNote(t=i * 0.083, lane=i % 4) for i in range(60)]
+def test_shape_difficulty_thins_dense_input() -> None:
+    # 60 notes spread over 10 seconds with VARIED strengths (so the selector
+    # has signal to rank instead of relying on tie-breaks). Easy keeps ~28%.
+    beats = [0.0 + i * 0.5 for i in range(21)]
+    notes = [
+        RawNote(t=i * 0.166, lane=i % 4, strength=0.2 + (i % 5) * 0.15)
+        for i in range(60)
+    ]
     shaped = shape_difficulty(notes=notes, difficulty="easy", beats=beats)
-    density = approximate_density(shaped, beats)
-    assert density <= target_density("easy") * 1.5  # within 50% of target
+    assert 12 <= len(shaped) <= 22, f"expected ~17 notes, got {len(shaped)}"
 
 
-def test_shape_difficulty_no_op_when_under_target() -> None:
-    beats = [0.0 + i * 0.5 for i in range(11)]
-    notes = [RawNote(t=i * 1.0, lane=i % 4) for i in range(4)]
-    shaped = shape_difficulty(notes=notes, difficulty="hard", beats=beats)
-    assert shaped == notes
+def test_shape_difficulty_keeps_more_at_higher_difficulty() -> None:
+    # Same input, different difficulties. Progression must be monotone.
+    beats = [0.0 + i * 0.5 for i in range(21)]
+    notes = [
+        RawNote(t=i * 0.166, lane=i % 4, strength=0.2 + (i % 5) * 0.15)
+        for i in range(60)
+    ]
+    easy = shape_difficulty(notes=notes, difficulty="easy", beats=beats)
+    normal = shape_difficulty(notes=notes, difficulty="normal", beats=beats)
+    hard = shape_difficulty(notes=notes, difficulty="hard", beats=beats)
+    expert = shape_difficulty(notes=notes, difficulty="expert", beats=beats)
+    assert len(easy) < len(normal) < len(hard) <= len(expert), (
+        f"non-monotone: easy={len(easy)} normal={len(normal)} "
+        f"hard={len(hard)} expert={len(expert)}"
+    )
 
 
 def test_shape_difficulty_handles_empty() -> None:
     assert shape_difficulty(notes=[], difficulty="normal", beats=[]) == []
+
+
+def test_shape_difficulty_sanity_caps_unplayable_bursts() -> None:
+    # 20 notes packed into a single second (every 50ms) should be capped
+    # at 8 by the sanity rule, regardless of difficulty.
+    beats = [0.0 + i * 0.5 for i in range(11)]
+    notes = [RawNote(t=i * 0.05, lane=i % 4) for i in range(20)]
+    shaped = shape_difficulty(notes=notes, difficulty="expert", beats=beats)
+    # In the 1-second window [0.0, 1.0] there can be at most 8 notes.
+    in_first_second = [n for n in shaped if n.t <= 1.0]
+    assert len(in_first_second) <= 8, f"sanity cap missed: {len(in_first_second)} notes in 1s"
 
 
 def test_shape_difficulty_preserves_chord_partners() -> None:
