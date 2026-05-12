@@ -2,7 +2,7 @@
 // Lives in /game so it stays UI-independent (the renderer is injected).
 
 import type { Chart } from "@/types/chart";
-import { advanceCursor, findCandidateNote, judge, registerPress, scoreForJudgment } from "./hit-detection";
+import { advanceCursor, findCandidateNote, registerPress, scoreForJudgment } from "./hit-detection";
 import { InputCapture, type KeyBindings } from "./input";
 import { applyHit, applyMiss, accuracyPercent, emptyScoreState, multiplierFor } from "./scoring";
 import {
@@ -233,43 +233,28 @@ export class GameLoop {
     this.lastJudgment = { judgment: "miss", deltaMs: 0, atMs: pressGameMs };
   }
 
-  // The player released the key on an active hold. Three outcomes:
-  //   - release lands within meh of the expected tail time -> hold completes
-  //     successfully. Tail pays a half-base bonus.
-  //   - release is BEFORE the tail by more than meh -> hold broken. The
-  //     note becomes a miss, combo resets, just like missing a tap.
-  //   - release is AFTER the tail by more than meh -> tail timed out. Same
-  //     punishment as breaking, the note is missed.
+  // The player released the key while still in an active hold. Two outcomes:
+  //   - release happened AT or AFTER the tail (with a meh-window grace
+  //     before the tail to be forgiving about a hair-early release) -> the
+  //     hold completes successfully. The tick auto-completes any hold whose
+  //     tail has passed, so this branch only fires when the player releases
+  //     at exactly the tail time or in the tiny grace before it.
+  //   - release happened BEFORE the tail by more than meh -> hold broken.
+  //     The note becomes a miss; combo resets.
+  // Release time NEVER deducts score or combo on its own past the duration;
+  // this matches osu!mania LN release semantics for casual play.
   private resolveHoldOnRelease(hold: ActiveHold, nowGameMs: number) {
     this.activeHolds.delete(hold.lane);
     const note = this.notes[hold.noteIndex]!;
     if (note.hit || note.missed) return;
     const releaseDelta = nowGameMs - hold.expectedReleaseMs;
-    const releaseJudgment = judge(releaseDelta, this.windows);
-    if (releaseJudgment !== "miss") {
-      // Tail landed in window. Pay the bonus and complete the hold.
-      note.hit = true;
-      note.holding = false;
-      note.hitAtMs = nowGameMs;
-      this.score = applyHit(this.score, {
-        judgment: releaseJudgment,
-        deltaMs: releaseDelta,
-        noteIndex: hold.noteIndex,
-        combo: this.score.combo + 1,
-        scoreAwarded: Math.floor(scoreForJudgment(releaseJudgment) / 2),
-      });
-      this.callbacks.onHit?.({
-        judgment: releaseJudgment,
-        deltaMs: releaseDelta,
-        lane: hold.lane,
-      });
-      this.lastJudgment = {
-        judgment: releaseJudgment,
-        deltaMs: releaseDelta,
-        atMs: nowGameMs,
-      };
+    if (releaseDelta >= -this.windows.meh) {
+      // Held long enough. Complete the hold and pay the same half-base bonus
+      // the old code used to. We always pay the bonus as a "great" because
+      // release timing no longer determines tier.
+      this.completeHold(hold, nowGameMs);
     } else {
-      // Released too early (or, hypothetically, very late): hold broken.
+      // Released too early. Hold broken.
       note.missed = true;
       note.holding = false;
       note.judgment = "miss";
@@ -277,6 +262,32 @@ export class GameLoop {
       this.score.multiplier = multiplierFor(this.score.combo);
       this.lastJudgment = { judgment: "miss", deltaMs: releaseDelta, atMs: nowGameMs };
     }
+  }
+
+  // Mark an active hold as successfully completed: tail bonus, combo +1,
+  // hit ghost, optional SFX. Used by both the auto-complete in tick() and
+  // the on-time-release branch in resolveHoldOnRelease.
+  private completeHold(hold: ActiveHold, gameMs: number): void {
+    const note = this.notes[hold.noteIndex]!;
+    if (note.hit || note.missed) return;
+    note.hit = true;
+    note.holding = false;
+    note.hitAtMs = gameMs;
+    // Tail completion always pays a "great" tier bonus. Release timing no
+    // longer changes the tier; sustaining for the full duration is the win.
+    this.score = applyHit(this.score, {
+      judgment: "great",
+      deltaMs: 0,
+      noteIndex: hold.noteIndex,
+      combo: this.score.combo + 1,
+      scoreAwarded: Math.floor(scoreForJudgment("great") / 2),
+    });
+    this.callbacks.onHit?.({
+      judgment: "great",
+      deltaMs: 0,
+      lane: hold.lane,
+    });
+    this.lastJudgment = { judgment: "great", deltaMs: 0, atMs: gameMs };
   }
 
   private applyResult(result: HitResult, gameMs: number) {
@@ -288,21 +299,14 @@ export class GameLoop {
     if (!this.running) return;
     const gameMs = gameTimeMs(this.clock, this.offsetMs);
 
-    // Time out any active hold whose tail is well past the release window.
-    // We don't wait for the player to release the key; the note is already
-    // a miss and we want the combo break to land at the right moment.
+    // Auto-complete any active hold whose tail time has passed. The player
+    // is allowed to keep holding past the duration; release timing past
+    // expectedReleaseMs no longer penalizes. This is the casual osu!mania
+    // LN convention: sustain for the duration = win.
     for (const [lane, hold] of this.activeHolds) {
-      if (gameMs > hold.expectedReleaseMs + this.windows.meh) {
+      if (gameMs >= hold.expectedReleaseMs) {
         this.activeHolds.delete(lane);
-        const note = this.notes[hold.noteIndex]!;
-        if (!note.hit && !note.missed) {
-          note.missed = true;
-          note.holding = false;
-          note.judgment = "miss";
-          this.score = applyMiss(this.score);
-          this.score.multiplier = multiplierFor(this.score.combo);
-          this.lastJudgment = { judgment: "miss", deltaMs: 0, atMs: gameMs };
-        }
+        this.completeHold(hold, gameMs);
       }
     }
 
