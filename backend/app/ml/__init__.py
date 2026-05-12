@@ -1,11 +1,19 @@
 """ML pipelines for BeatBridge chart generation.
 
-This package is intentionally empty at the architecture-only stage.
-Modules will land here when the ML plan in docs/ML_PLAN.md is executed.
+Active modules (see docs/ML_PLAN.md for the full plan):
+  beat_this.py     Beat + downbeat detector (CPJKU Beat This!, Phase 1).
+                   Activated by USE_BEAT_THIS=1. Falls back to librosa.
+  beat_cache.py    Disk cache for beat-tracker output, keyed by audio
+                   content hash so regeneration at multiple difficulties
+                   doesn't re-run the model.
 
-Expected layout (see ML_PLAN.md for what each does):
-  stems_demucs.py      Source separation via Demucs (real, not the scaffold)
-  transcribe.py        Polyphonic transcription (Basic Pitch / MT3)
-  lane_model.py        Learned lane assignment (osu!mania-trained classifier)
-  embeddings.py        Audio embeddings for downstream tasks
+Planned (not yet implemented):
+  embeddings.py    MERT embeddings for section detection (Phase 3).
+  lane_model.py    Learned lane assignment trained on osu!mania (Phase 5).
+
+Source separation (Demucs) lives at app/pipeline/stems.py because it
+predates this package; that path activates when USE_DEMUCS=1 and feeds
+per-stem onset detection in app/pipeline/onset_detect.py.
 """
+
+from app.ml import beat_cache, beat_this  # noqa: F401

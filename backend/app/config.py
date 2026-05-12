@@ -20,6 +20,10 @@ class Settings:
     cache_dir: Path
     allow_ytdlp: bool
     use_demucs: bool
+    # Phase 1 of docs/ML_PLAN.md. When True AND `beat_this` is importable,
+    # the pipeline uses CPJKU Beat This! for beat + downbeat detection.
+    # Falls back to librosa.beat.beat_track on any failure.
+    use_beat_this: bool
     cors_origins: list[str]
     log_level: str
 
@@ -35,6 +39,7 @@ class Settings:
             cache_dir=cache_dir,
             allow_ytdlp=_bool(os.environ.get("BACKEND_ALLOW_YTDLP"), default=False),
             use_demucs=_bool(os.environ.get("USE_DEMUCS"), default=False),
+            use_beat_this=_bool(os.environ.get("USE_BEAT_THIS"), default=False),
             cors_origins=origins or ["*"],
             log_level=os.environ.get("LOG_LEVEL", "info"),
         )

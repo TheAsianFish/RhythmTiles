@@ -30,6 +30,10 @@ dev = [
 ]
 ytdlp = ["yt-dlp>=2024.5.27", "imageio-ffmpeg>=0.5.0"]
 demucs = ["demucs>=4.0.1"]
+# Phase 1 of docs/ML_PLAN.md: Beat This! beat + downbeat detector. MIT
+# licensed, weights tens of MB. Pulls torch as a transitive dep so the
+# install is heavy; only required for USE_BEAT_THIS=1.
+ml = ["beat-this>=0.1.0", "torch>=2.0"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]

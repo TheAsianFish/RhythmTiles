@@ -15,9 +15,16 @@ logger = logging.getLogger("beatbridge.warmup")
 
 
 def warm_pipeline() -> float:
-    """Run a tiny pipeline pass to JIT-compile everything. Returns elapsed seconds."""
+    """Run a tiny pipeline pass to JIT-compile everything. Returns elapsed seconds.
+
+    Also warms the Beat This! detector when USE_BEAT_THIS=1 so the first
+    user request doesn't pay the ~1-3s weight-load cost. Safe to call from
+    a background thread.
+    """
     import numpy as np
 
+    from app.config import settings
+    from app.ml import beat_this
     from app.pipeline.beat_track import detect_beats
     from app.pipeline.onset_detect import detect_onsets
 
@@ -30,6 +37,8 @@ def warm_pipeline() -> float:
         y[k : k + 256] += 0.6
 
     t0 = time.perf_counter()
+    if settings.use_beat_this:
+        beat_this.warm()  # no-op when the package isn't importable
     detect_beats(y=y, sr=sr)
     detect_onsets(y=y, sr=sr)
     elapsed = time.perf_counter() - t0
