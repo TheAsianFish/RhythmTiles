@@ -439,5 +439,17 @@ window.addEventListener("message", (ev) => {
       // ignore that since the user has already interacted with the page.
       void videoEl?.play().catch(() => {});
       break;
+    case "BB_REQUEST_VIDEO_TOGGLE":
+      // Posted by the overlay's P-key handler. The overlay can't reach the
+      // page's <video> directly, so it asks us to flip state. Resume from
+      // pause round-trips back as BB_VIDEO_PLAYING which triggers the
+      // existing 3-2-1 countdown on the overlay side.
+      if (!videoEl) break;
+      if (videoEl.paused || videoEl.ended) {
+        void videoEl.play().catch(() => {});
+      } else {
+        videoEl.pause();
+      }
+      break;
   }
 });

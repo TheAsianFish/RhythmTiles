@@ -136,6 +136,28 @@ function App() {
     };
   }, [dragging]);
 
+  // Pause toggle from inside the iframe. The content script installs a
+  // global P handler on the page window, but that only fires when focus
+  // is on the YouTube page, not when the user clicked into the overlay.
+  // We install a mirror handler here that forwards to the parent so P
+  // works no matter who has focus. Only fires when KeyP is NOT bound to
+  // a lane (we don't override the lane press if the user remapped to P).
+  useEffect(() => {
+    function onKey(ev: KeyboardEvent) {
+      if (ev.code !== "KeyP") return;
+      const tgt = ev.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) {
+        return;
+      }
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      if (ev.repeat) return;
+      window.parent.postMessage({ type: "BB_REQUEST_VIDEO_TOGGLE" }, "*");
+    }
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true } as any);
+  }, []);
+
   // Listen to parent messages.
   useEffect(() => {
     function handler(msg: unknown) {
