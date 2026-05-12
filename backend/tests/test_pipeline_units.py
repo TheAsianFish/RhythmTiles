@@ -330,6 +330,43 @@ def test_shape_difficulty_uniform_when_no_buckets() -> None:
     assert [n.t for n in without_buckets] == [n.t for n in with_uniform_buckets]
 
 
+def test_beat_fill_inserts_synthetics_in_long_empty_runs() -> None:
+    from app.pipeline.beat_fill import fill_empty_beats
+    from app.pipeline.onset_detect import Onset
+
+    # 10 beats every 0.5s. Real onsets only at beats 0 and 9. The 8-beat
+    # empty run in the middle should get filled.
+    beats = [i * 0.5 for i in range(10)]
+    onsets = [
+        Onset(t=0.0, strength=1.0, centroid_hz=200.0),
+        Onset(t=4.5, strength=1.0, centroid_hz=2000.0),
+    ]
+    out = fill_empty_beats(onsets, beats)
+    assert len(out) > len(onsets), "should have inserted synthetics"
+    # New onsets land near beat times.
+    new_ts = sorted(o.t for o in out if o not in onsets)
+    for t in new_ts:
+        nearest = min(beats, key=lambda b: abs(b - t))
+        assert abs(t - nearest) < 0.01, f"synthetic {t} not on a beat (nearest {nearest})"
+
+
+def test_beat_fill_preserves_short_empty_runs() -> None:
+    from app.pipeline.beat_fill import fill_empty_beats
+    from app.pipeline.onset_detect import Onset
+
+    # 5 beats, with a single empty beat in the middle (beat 2). Short runs
+    # should NOT be filled - they're musical breaks.
+    beats = [i * 0.5 for i in range(5)]
+    onsets = [
+        Onset(t=0.0, strength=1.0, centroid_hz=200.0),
+        Onset(t=0.5, strength=1.0, centroid_hz=200.0),
+        Onset(t=1.5, strength=1.0, centroid_hz=200.0),
+        Onset(t=2.0, strength=1.0, centroid_hz=200.0),
+    ]
+    out = fill_empty_beats(onsets, beats)
+    assert len(out) == len(onsets), "1-beat empty run should not be filled"
+
+
 def test_stems_pass_through_when_demucs_disabled() -> None:
     import numpy as np
 

@@ -1,14 +1,18 @@
 """Onset detection. Returns time + spectral centroid for lane assignment.
 
-Default mode runs two onset detectors and merges them:
-  - "energy" envelope (librosa default) catches percussive events well.
-  - "cqt" envelope (constant-Q transform) catches pitched / vocal events
-    that the energy envelope tends to miss on softer choruses.
+Default mode runs THREE onset detectors and merges them:
+  - "energy" envelope on full mix (librosa default) catches percussive
+    events well.
+  - "cqt" envelope (constant-Q transform) on full mix catches pitched
+    events that the energy envelope tends to miss on softer choruses.
+  - HARMONIC stream via librosa.effects.hpss + energy envelope on the
+    harmonic component, which strips drums and isolates vocal/melodic
+    onsets. This is the big win on JPOP / vocal-driven choruses where
+    drums get quiet and the chart used to go nearly empty.
 
-Both streams are merged with a small min-gap dedupe so a single physical
-event detected by both detectors doesn't produce two notes. On songs with
-vocal-driven choruses this picks up melodic note attacks that the old
-single-envelope path missed; on drum-heavy songs it adds little.
+All three streams are merged with a min-gap dedupe so a single physical
+event detected by multiple detectors doesn't produce duplicate notes.
+HPSS adds ~30-40% to onset-detect time but no extra dependencies.
 """
 
 from __future__ import annotations
@@ -34,16 +38,15 @@ class Onset:
 
 
 def detect_onsets(*, y: "np.ndarray", sr: int, hop_length: int = 512) -> list[Onset]:
-    """Combined energy + CQT onset detection on the given audio.
+    """Combined energy + CQT + harmonic onset detection on the given audio.
 
     For each detected onset frame we sample the spectral centroid so the
     lane assigner can route low-frequency hits (kicks) to the left lanes
     and high-frequency hits (snares, hi-hats, vocals) to the right.
     """
     import librosa  # noqa: WPS433
-    import numpy as np  # noqa: WPS433
 
-    # Pre-compute the centroid once. Both onset streams share it.
+    # Pre-compute the centroid once. All onset streams share it.
     centroid = librosa.feature.spectral_centroid(y=y, sr=sr, hop_length=hop_length)[0]
     n_frames = int(len(centroid))
 
@@ -64,7 +67,27 @@ def detect_onsets(*, y: "np.ndarray", sr: int, hop_length: int = 512) -> list[On
         n_frames=n_frames,
     )
 
+    # HPSS-derived harmonic stream. librosa.effects.hpss returns a tuple
+    # (harmonic, percussive); we run onset detection on the harmonic side
+    # only, which strips drums and reveals vocal / melody attacks. Cheap
+    # and uses no new dependencies.
+    harmonic_onsets: list[Onset] = []
+    try:
+        y_harm, _y_perc = librosa.effects.hpss(y)
+        harmonic_onsets = _onsets_from_envelope(
+            y=y_harm,
+            sr=sr,
+            hop_length=hop_length,
+            feature="energy",
+            centroid=centroid,
+            n_frames=n_frames,
+        )
+    except Exception:
+        # HPSS can fail on very short clips; just skip and use the other two.
+        harmonic_onsets = []
+
     merged = _merge_onset_lists(energy_onsets, cqt_onsets)
+    merged = _merge_onset_lists(merged, harmonic_onsets)
     return merged
 
 

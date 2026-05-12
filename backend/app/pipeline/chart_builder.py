@@ -22,6 +22,7 @@ from app.models import (
     PIPELINE_VERSION,
 )
 from app.config import settings
+from app.pipeline.beat_fill import fill_empty_beats
 from app.pipeline.beat_track import detect_beats
 from app.pipeline.difficulty import shape_difficulty
 from app.pipeline.hold_detect import detect_holds
@@ -149,6 +150,16 @@ def build_chart_from_audio(
         logger.info(
             "stems separated; onset detection ran on drum stem (%d onsets)",
             len(onsets),
+        )
+    # Beat-grid safety net: fill empty stretches with synthetic onsets so
+    # vocal-only choruses don't go dead. Runs on the full-mix beat grid
+    # regardless of stem path. See app/pipeline/beat_fill.py.
+    onsets_before_fill = len(onsets)
+    onsets = fill_empty_beats(onsets, beat_info.beats)
+    if len(onsets) != onsets_before_fill:
+        logger.info(
+            "beat-grid fill added %d synthetic onsets to cover empty runs",
+            len(onsets) - onsets_before_fill,
         )
     beat_period_s: float | None = None
     if beat_info.bpm and beat_info.bpm > 0:
