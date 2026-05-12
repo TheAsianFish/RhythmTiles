@@ -2,13 +2,16 @@
 // Lives in /game so it stays UI-independent (the renderer is injected).
 
 import type { Chart } from "@/types/chart";
-import { advanceCursor, registerPress, scoreForJudgment } from "./hit-detection";
+import { advanceCursor, judge, registerPress, scoreForJudgment } from "./hit-detection";
 import { InputCapture, type KeyBindings } from "./input";
 import { applyHit, applyMiss, accuracyPercent, emptyScoreState, multiplierFor } from "./scoring";
 import {
   DEFAULT_HIT_WINDOWS,
+  DEFAULT_OD,
+  hitWindowsForOD,
   type ActiveHold,
   type HitResult,
+  type HitWindowsMs,
   type Judgment,
   noteRuntimes,
   type NoteRuntime,
@@ -33,6 +36,8 @@ export interface GameLoopOptions {
   bindings: KeyBindings;
   audioLatencyOffsetMs: number;
   callbacks: LoopCallbacks;
+  // Overall Difficulty (osu!-style). Higher = tighter windows. Default 8.
+  overallDifficulty?: number;
 }
 
 export class GameLoop {
@@ -53,6 +58,7 @@ export class GameLoop {
   // Index up to which we have already folded misses into the score state.
   // Each frame we only need to inspect notes between this value and the cursor.
   private missAccountedUpTo = 0;
+  private windows: HitWindowsMs;
 
   constructor(opts: GameLoopOptions) {
     this.chart = opts.chart;
@@ -61,6 +67,7 @@ export class GameLoop {
     this.offsetMs = opts.audioLatencyOffsetMs;
     this.capture = new InputCapture(opts.bindings);
     this.callbacks = opts.callbacks;
+    this.windows = hitWindowsForOD(opts.overallDifficulty ?? DEFAULT_OD);
   }
 
   setBindings(b: KeyBindings) {
@@ -100,6 +107,7 @@ export class GameLoop {
         notes: this.notes,
         cursor: this.cursor,
         combo: this.score.combo,
+        windows: this.windows,
       });
       if (result) {
         this.applyResult(result, nowGameMs);
@@ -120,7 +128,7 @@ export class GameLoop {
         this.activeHolds.delete(ev.lane);
         const releaseDelta = nowGameMs - hold.expectedReleaseMs;
         // Re-use the same hit windows for hold-release accuracy.
-        const judgment = judgeAbs(Math.abs(releaseDelta));
+        const judgment = judge(releaseDelta, this.windows);
         if (judgment !== "miss") {
           // Treat as bonus award scaled like a tap.
           this.score = applyHit(this.score, {
@@ -146,7 +154,7 @@ export class GameLoop {
     const gameMs = gameTimeMs(this.clock, this.offsetMs);
 
     // Advance cursor; mark past-window notes as missed.
-    this.cursor = advanceCursor(this.notes, this.cursor, gameMs);
+    this.cursor = advanceCursor(this.notes, this.cursor, gameMs, this.windows.meh);
     // Fold any newly-missed notes into the score state. Bounded by the cursor;
     // notes ahead of the cursor cannot yet be missed.
     for (let i = this.missAccountedUpTo; i < this.cursor; i++) {
@@ -192,9 +200,6 @@ export class GameLoop {
   };
 }
 
-function judgeAbs(absMs: number): Judgment {
-  if (absMs <= DEFAULT_HIT_WINDOWS.perfect) return "perfect";
-  if (absMs <= DEFAULT_HIT_WINDOWS.good) return "good";
-  if (absMs <= DEFAULT_HIT_WINDOWS.ok) return "ok";
-  return "miss";
-}
+// Suppress unused-import warning until we surface DEFAULT_HIT_WINDOWS in the
+// HUD (e.g. a settings panel that displays "current OD => windows").
+void DEFAULT_HIT_WINDOWS;

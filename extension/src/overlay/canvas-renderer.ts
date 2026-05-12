@@ -203,13 +203,18 @@ function formatScore(score: number): string {
 
 function judgmentColor(j: string): string {
   switch (j) {
-    case "perfect":
-      return "#ffd700";
+    case "max":
+      return "#9ef0ff";   // rainbow / max: pale cyan
+    case "great":
+      return "#ffd700";   // gold
     case "good":
-      return "#7cffb0";
+      return "#7cffb0";   // green
     case "ok":
-      return "#7cb0ff";
+      return "#7cb0ff";   // blue
+    case "meh":
+      return "#ffae5e";   // orange
+    case "miss":
     default:
-      return "#ff7c7c";
+      return "#ff7c7c";   // red
   }
 }

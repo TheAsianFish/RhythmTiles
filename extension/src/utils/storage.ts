@@ -9,6 +9,7 @@ export interface UserSettings {
   opacity: number;                // 0-1
   bindings: [string, string, string, string]; // lane 0..3 -> key code
   sfxEnabled: boolean;
+  overallDifficulty: number;      // OD value for hit windows; default 8
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -18,6 +19,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   opacity: 0.92,
   bindings: ["KeyD", "KeyF", "KeyJ", "KeyK"],
   sfxEnabled: false,
+  overallDifficulty: 8,
 };
 
 const SETTINGS_KEY = "beatbridge.settings";

@@ -1,25 +1,66 @@
 import type { Note } from "@/types/chart";
 
-export type Judgment = "perfect" | "good" | "ok" | "miss";
+// Six-tier judgment system, osu!mania-style.
+// Each tier has a base score (see hit-detection.scoreForJudgment) and a hit
+// window derived from the OD (Overall Difficulty) value (see hitWindowsForOD).
+export type Judgment = "max" | "great" | "good" | "ok" | "meh" | "miss";
 
+export const ALL_JUDGMENTS: readonly Judgment[] = [
+  "max",
+  "great",
+  "good",
+  "ok",
+  "meh",
+  "miss",
+] as const;
+
+// Hit window in absolute milliseconds (|deltaMs| <= window).
+// `miss` is the OUTER boundary: presses outside this are not even registered
+// as a miss-on-press; the note will eventually time out and be marked missed
+// when it leaves the active window.
 export interface HitWindowsMs {
-  perfect: number;
+  max: number;
+  great: number;
   good: number;
   ok: number;
+  meh: number;
+  miss: number;
 }
 
-export const DEFAULT_HIT_WINDOWS: HitWindowsMs = {
-  perfect: 25,
-  good: 50,
-  ok: 100,
-};
+// Compute hit windows for a given Overall Difficulty (OD).
+//
+// osu!mania v1 formula (ms):
+//   max:   16.5 (fixed; the "rainbow 300" / MAX tier)
+//   great: 64 - 3 * OD
+//   good:  97 - 3 * OD
+//   ok:   127 - 3 * OD
+//   meh:  151 - 3 * OD
+//   miss boundary: 188 - 3 * OD
+//
+// Default OD = 8 is roughly "challenging" (great window ~40ms).
+export const DEFAULT_OD = 8;
+export const MAX_WINDOW_MS = 16.5;
+
+export function hitWindowsForOD(od: number): HitWindowsMs {
+  const k = Math.max(0, od);
+  return {
+    max: MAX_WINDOW_MS,
+    great: 64 - 3 * k,
+    good: 97 - 3 * k,
+    ok: 127 - 3 * k,
+    meh: 151 - 3 * k,
+    miss: 188 - 3 * k,
+  };
+}
+
+export const DEFAULT_HIT_WINDOWS: HitWindowsMs = hitWindowsForOD(DEFAULT_OD);
 
 export interface HitResult {
   judgment: Judgment;
   deltaMs: number;            // signed: positive = late, negative = early
   noteIndex: number;          // index into the chart.notes array
   combo: number;              // combo after this hit
-  scoreAwarded: number;       // points before multiplier
+  scoreAwarded: number;       // base points (pre-combo multiplication)
 }
 
 export interface ScoreState {
@@ -39,6 +80,14 @@ export interface ActiveHold {
 }
 
 // A snapshot of a single note as the game tracks it during play.
+//
+// Future: chord support. The chart contract already allows multiple notes at
+// the same `t` value (since notes is a flat array indexed by appearance).
+// When chord notes are added, the lane assigner will emit N notes with the
+// same `t` and different `lane` values; the input + hit detection already
+// scope by lane so the existing logic handles multi-press naturally. The
+// only gap is visual highlighting that a column-spanning chord is incoming;
+// see canvas-renderer for where to add a chord-link decoration.
 export interface NoteRuntime {
   index: number;
   note: Note;

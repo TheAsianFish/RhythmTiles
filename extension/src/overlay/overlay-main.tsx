@@ -164,6 +164,7 @@ function App() {
         clock: clockRef.current,
         bindings: { codes: settings.bindings },
         audioLatencyOffsetMs: settings.audioLatencyOffsetMs,
+        overallDifficulty: settings.overallDifficulty,
         callbacks: {
           onFrame: ({ gameMs, notes, score, lastJudgment, pressedLanes }) => {
             if (lastJudgment) lastJudgmentRef.current = lastJudgment;
@@ -242,8 +243,9 @@ function App() {
             <div className="row">Max combo {results.score.maxCombo}</div>
             <div className="row">Accuracy {results.accuracy.toFixed(1)}%</div>
             <div className="row" style={{ marginTop: 8, opacity: 0.7 }}>
-              Perfect {results.score.hitCounts.perfect}, Good {results.score.hitCounts.good},
-              OK {results.score.hitCounts.ok}, Miss {results.score.hitCounts.miss}
+              MAX {results.score.hitCounts.max}, GREAT {results.score.hitCounts.great},
+              GOOD {results.score.hitCounts.good}, OK {results.score.hitCounts.ok},
+              MEH {results.score.hitCounts.meh}, MISS {results.score.hitCounts.miss}
             </div>
             <div style={{ marginTop: 14, display: "flex", gap: 8, justifyContent: "center" }}>
               <button onClick={restart}>Replay</button>
