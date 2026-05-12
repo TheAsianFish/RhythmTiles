@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 PIPELINE_VERSION = "0.1.0"
 SCHEMA_VERSION = "1.0"
 
-Difficulty = Literal["easy", "normal", "hard"]
+Difficulty = Literal["easy", "normal", "hard", "expert"]
 NoteType = Literal["tap", "hold"]
 AudioSource = Literal["youtube", "upload", "synthetic"]
 

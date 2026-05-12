@@ -73,9 +73,15 @@ def assign_lanes(
     y: "np.ndarray",
     sr: int,
     beat_period_s: float | None = None,
+    chord_quantile: float = CHORD_STRENGTH_QUANTILE,
 ) -> list[RawNote]:
     """Greedy left-to-right assignment honouring frequency, anti-cluster,
-    hand-balance, and chord rules."""
+    hand-balance, and chord rules.
+
+    `chord_quantile` lets the caller tune chord density per difficulty:
+    higher values (closer to 1.0) emit fewer chords, lower values emit more.
+    Default matches the module-level CHORD_STRENGTH_QUANTILE.
+    """
     if not onsets:
         return []
 
@@ -83,7 +89,7 @@ def assign_lanes(
     if cutoff <= 0 or len(onsets) < 8:
         cutoff = FALLBACK_CUTOFF_HZ
 
-    chord_threshold = _chord_threshold(onsets)
+    chord_threshold = _chord_threshold(onsets, quantile=chord_quantile)
     stream_gap_s = (beat_period_s * 0.5) if beat_period_s else DEFAULT_STREAM_GAP_S
 
     notes: list[RawNote] = []
@@ -191,12 +197,16 @@ def _pick_band(
     return None
 
 
-def _chord_threshold(onsets: list[Onset]) -> float:
-    """Strength at the CHORD_STRENGTH_QUANTILE percentile, or +inf if too few onsets."""
+def _chord_threshold(
+    onsets: list[Onset],
+    *,
+    quantile: float = CHORD_STRENGTH_QUANTILE,
+) -> float:
+    """Strength at the given quantile, or +inf if too few onsets."""
     if len(onsets) < MIN_ONSETS_FOR_CHORDS:
         return float("inf")
     strengths = sorted(o.strength for o in onsets)
-    idx = int(len(strengths) * CHORD_STRENGTH_QUANTILE)
+    idx = int(len(strengths) * quantile)
     return strengths[min(idx, len(strengths) - 1)]
 
 

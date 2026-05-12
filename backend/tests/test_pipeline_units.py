@@ -22,6 +22,9 @@ def test_target_density_known_values() -> None:
     assert target_density("easy") == 1.0
     assert target_density("normal") == 1.5
     assert target_density("hard") == 2.5
+    # Expert is the new 4th tier. Strictly denser than hard so charts feel
+    # genuinely harder rather than identical.
+    assert target_density("expert") > target_density("hard")
 
 
 def test_assign_lanes_routes_by_centroid() -> None:

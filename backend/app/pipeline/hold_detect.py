@@ -76,13 +76,15 @@ def detect_holds(
     hop_length: int = 512,
     beat_period_s: float | None = None,
     beats_s: list[float] | None = None,
+    max_hold_ratio: float = MAX_HOLD_RATIO,
 ) -> list[RawNote]:
-    """Return a new list with up to MAX_HOLD_RATIO of taps promoted to holds.
+    """Return a new list with up to `max_hold_ratio` of taps promoted to holds.
 
     When `beat_period_s` is provided, the min and max hold duration are
     derived from MIN_HOLD_BEATS and MAX_HOLD_BEATS. When `beats_s` is
     provided too, accepted hold ends are snapped to the nearest beat or
-    half-beat boundary in that list.
+    half-beat boundary in that list. `max_hold_ratio` lets the caller scale
+    hold density per difficulty (more on expert, fewer on easy).
     """
     if not notes:
         return notes
@@ -142,7 +144,7 @@ def detect_holds(
     if not candidates:
         return notes
 
-    max_holds = max(1, int(len(notes) * MAX_HOLD_RATIO))
+    max_holds = max(1, int(len(notes) * max_hold_ratio))
     candidates.sort(key=lambda c: c[1], reverse=True)
     keep_indices = {idx for idx, _ in candidates[:max_holds]}
     durations = dict(candidates)

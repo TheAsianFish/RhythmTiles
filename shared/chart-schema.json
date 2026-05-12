@@ -46,7 +46,7 @@
       "properties": {
         "generatedAt": { "type": "string", "format": "date-time" },
         "pipelineVersion": { "type": "string" },
-        "difficulty": { "type": "string", "enum": ["easy", "normal", "hard"] },
+        "difficulty": { "type": "string", "enum": ["easy", "normal", "hard", "expert"] },
         "keyMode": { "type": "integer", "enum": [4] },
         "title": { "type": "string" },
         "artist": { "type": "string" }

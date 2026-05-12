@@ -28,6 +28,7 @@ _DENSITY_TARGETS = {
     "easy": 1.0,
     "normal": 1.5,
     "hard": 2.5,
+    "expert": 3.8,
 }
 
 # How close to min_gap a different-lane note can sneak in. 0.6 keeps the

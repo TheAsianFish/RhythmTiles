@@ -36,6 +36,20 @@ logger = logging.getLogger("beatbridge.pipeline")
 # length of a musical phrase so individual beats and bars don't dominate.
 _ENERGY_WINDOW_S = 4.0
 
+# Per-difficulty tuning. Higher density + lower chord quantile + higher
+# hold ratio = more challenge. Expert is meant to feel busy and technical,
+# not random; the lane assigner's hand-balance and chord rules still apply.
+_DIFFICULTY_TUNING = {
+    "easy":   {"chord_quantile": 0.95, "hold_ratio": 0.02},
+    "normal": {"chord_quantile": 0.88, "hold_ratio": 0.05},
+    "hard":   {"chord_quantile": 0.82, "hold_ratio": 0.08},
+    "expert": {"chord_quantile": 0.72, "hold_ratio": 0.12},
+}
+
+
+def _tuning_for(difficulty: str) -> dict:
+    return _DIFFICULTY_TUNING.get(difficulty, _DIFFICULTY_TUNING["normal"])
+
 
 def _energy_buckets_for_notes(
     *,
@@ -139,7 +153,14 @@ def build_chart_from_audio(
     beat_period_s: float | None = None
     if beat_info.bpm and beat_info.bpm > 0:
         beat_period_s = 60.0 / beat_info.bpm
-    raw_notes = assign_lanes(onsets=onsets, y=y, sr=sr, beat_period_s=beat_period_s)
+    tuning = _tuning_for(difficulty)
+    raw_notes = assign_lanes(
+        onsets=onsets,
+        y=y,
+        sr=sr,
+        beat_period_s=beat_period_s,
+        chord_quantile=tuning["chord_quantile"],
+    )
     energy_buckets = _energy_buckets_for_notes(notes=raw_notes, y=y, sr=sr)
     thinned = shape_difficulty(
         notes=raw_notes,
@@ -153,6 +174,7 @@ def build_chart_from_audio(
         sr=sr,
         beat_period_s=beat_period_s,
         beats_s=beat_info.beats,
+        max_hold_ratio=tuning["hold_ratio"],
     )
 
     return Chart(
