@@ -35,19 +35,24 @@ _DENSITY_TARGETS = {
 # there), a dense EDM song gets a lower ratio (don't spam the player).
 # Fixed ratios trained on one song don't generalize; calibration does.
 #
-# Bands picked to feel right for typical pop/rock at ~120-180 BPM. Tune
-# with playtest data, or replace this dict with an ML-learned function
-# of (song features -> target rate) once we have replay ratings.
-# Normal and Hard raised so vocal syllables and on-beat instrument hits
-# survive selectivity instead of being thinned to a sparse skeleton. Expert
-# nudged up slightly so it stays above Hard's new ceiling. Bumped again to
-# preserve more single-note coverage of vocal syllables and melodic ramps on
-# Normal/Hard; Expert gets a modest lift so the tier ordering still holds.
+# Bands picked to feel right for typical pop/rock at ~120-180 BPM.
+#
+# Calibration history:
+#  - Earliest values had Normal/Hard collapsing onto a thin skeleton on
+#    vocal-driven songs. Normal and Hard were raised so vocal syllables
+#    survive selectivity. (commit 5f1073c)
+#  - Hard 5.0-6.8 and Expert 5.8-7.6 then OVERLAPPED by 1 n/s, so the
+#    per-song calibrator landed them at nearly identical ratios on most
+#    songs. Playtesting confirmed tiers felt indistinguishable.
+#  - Current values: NO band overlap. Each tier's mid-point is roughly
+#    1.5-2 n/s above the previous. Combined with the chord_quantile
+#    spread (see _DIFFICULTY_TUNING in chart_builder), Expert plays
+#    visibly denser and more chord-heavy than Hard.
 TARGET_NOTES_PER_SEC = {
-    "easy":   (0.7, 1.5),
-    "normal": (3.0, 4.5),
-    "hard":   (5.0, 6.8),
-    "expert": (5.8, 7.6),
+    "easy":   (0.7, 1.5),     # mid 1.1  - sparse, on-beat fills only
+    "normal": (2.5, 3.8),     # mid 3.15 - one note per beat-ish
+    "hard":   (4.6, 5.9),     # mid 5.25 - half-beats fill in dense sections
+    "expert": (6.3, 7.8),     # mid 7.05 - approaches the sanity cap of 8/s
 }
 
 # Absolute bounds on the derived ratio so degenerate inputs (tiny or huge

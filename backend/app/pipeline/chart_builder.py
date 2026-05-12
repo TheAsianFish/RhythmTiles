@@ -59,10 +59,14 @@ _DIFFICULTY_TUNING = {
     # too thickly through sustained vocal regions and felt like a different
     # instrument from the tap stream. Keeping them rare makes each one read
     # as a deliberate musical moment rather than ambient noise.
+    # Wider quantile spread between Hard and Expert so Expert visibly has
+    # more chord stacks (and feels distinct from Hard), matching the n/s
+    # band separation in difficulty.TARGET_NOTES_PER_SEC. Easy/Normal
+    # unchanged: their tier separation comes mostly from the n/s band.
     "easy":   {"chord_quantile": 0.97, "hold_ratio": 0.01},
-    "normal": {"chord_quantile": 0.95, "hold_ratio": 0.025},
-    "hard":   {"chord_quantile": 0.92, "hold_ratio": 0.04},
-    "expert": {"chord_quantile": 0.90, "hold_ratio": 0.06},
+    "normal": {"chord_quantile": 0.94, "hold_ratio": 0.025},
+    "hard":   {"chord_quantile": 0.89, "hold_ratio": 0.04},
+    "expert": {"chord_quantile": 0.84, "hold_ratio": 0.07},
 }
 
 

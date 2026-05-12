@@ -2,6 +2,42 @@
 
 Append-only log of decisions that shape the project. Each entry records the date, the question, the choice, and why.
 
+## 2026-05-12: Difficulty band re-tune for distinct tiers
+
+**Question:** Playtesting confirmed Hard and Expert felt
+indistinguishable on most songs. Root cause: `TARGET_NOTES_PER_SEC`
+had Hard (5.0-6.8) and Expert (5.8-7.6) overlapping by 1 n/s, so the
+per-song calibrator landed both at nearly the same keep ratio.
+Chord quantile spread was also flat (0.92 vs 0.90), so Expert
+didn't even have visibly more chord stacks to compensate.
+
+**Choice:**
+- New non-overlapping bands: Easy (0.7-1.5), Normal (2.5-3.8),
+  Hard (4.6-5.9), Expert (6.3-7.8). Mid-points step roughly +2/+2/+2.
+- Chord quantile spread widened: Normal 0.94, Hard 0.89, Expert 0.84.
+  At Expert, ~16% of onsets are chord candidates (vs ~10% before),
+  so high-tier charts feel chord-heavy in a way Hard doesn't.
+- Hold ratio scaled with difficulty: Expert 0.07 (was 0.06).
+
+**Why:** Non-overlapping bands are the structural fix. Calibration
+can't separate two tiers whose targets overlap. The chord quantile
+adjustment is the perceptual layer: even when both tiers' n/s
+calibrate to the same number on a sparse song, the chord-stack
+density makes Expert feel "denser" anyway.
+
+**Validation:** 60s synth bench produces:
+- Easy   1.10/s, Normal 3.15/s, Hard 4.87/s, Expert 5.57/s
+- Note counts 66 → 189 → 292 → 334 (each tier meaningfully denser).
+
+Expert hits the candidate ceiling on this synth (not enough onsets in
+audio); on real music with subdivisions + per-stem detection active,
+Expert pushes past the synth ceiling into its 6.3-7.8 band.
+
+**Revisit when:** Playtesting on real songs shows specific genres
+landing in the wrong tier, OR when MERT section detection (Phase 3)
+gives us per-section density modulation (Hard might want to feel
+sparse in verses + dense in choruses rather than uniformly mid).
+
 ## 2026-05-12: In-overlay menu (no extension reload to change difficulty)
 
 **Question:** Changing difficulty mid-session required reloading the
