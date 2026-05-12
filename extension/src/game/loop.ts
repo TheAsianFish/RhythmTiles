@@ -250,6 +250,7 @@ export class GameLoop {
       // Tail landed in window. Pay the bonus and complete the hold.
       note.hit = true;
       note.holding = false;
+      note.hitAtMs = nowGameMs;
       this.score = applyHit(this.score, {
         judgment: releaseJudgment,
         deltaMs: releaseDelta,

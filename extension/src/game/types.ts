@@ -101,6 +101,11 @@ export interface NoteRuntime {
   // before the tail is released. The renderer keeps drawing the body while
   // this is true; the loop resolves it to hit or missed on release / timeout.
   holding: boolean;
+  // gameMs at which the player landed a successful hit on this note. Used
+  // by the renderer to fade out a ghost at the hit line instead of letting
+  // the note pop out of existence. Undefined until hit (success), and stays
+  // undefined for misses since there's nothing to fade.
+  hitAtMs?: number;
   judgment?: Judgment;
 }
 

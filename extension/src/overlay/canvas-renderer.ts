@@ -23,11 +23,15 @@ export const DEFAULT_RENDER_CONFIG: RenderConfig = {
   sideMarginPx: 16,
   laneGapPx: 4,
   hitLineFromBottomPx: 100,
-  noteHeightPx: 22,
+  noteHeightPx: 28,
   pixelsPerMs: 0.55,
   opacity: 1.0,
   hudReservedTopPx: 96,
 };
+
+// Time after a successful hit during which the renderer keeps drawing a
+// fading ghost of the note at the hit line, so notes don't just disappear.
+const HIT_FADE_MS = 220;
 
 // Mirror-pair palette per osu!mania 4K convention. Lanes 0 and 3 (D, K)
 // share a cool tone; lanes 1 and 2 (F, J) share a warm tone. Hand parsing
@@ -192,8 +196,31 @@ export class CanvasRenderer {
     ctx.stroke();
     ctx.restore();
 
-    // Notes.
+    // Hit-fade ghosts. For each note that was successfully hit within the
+    // last HIT_FADE_MS, draw a fading expanding outline at the hit line so
+    // the player sees that the note registered there. We scan a small
+    // window around the cursor since notes older than HIT_FADE_MS have
+    // long since faded.
     ctx.globalAlpha = c.opacity;
+    for (const n of frame.notes) {
+      if (!n.hit || n.hitAtMs === undefined) continue;
+      const age = frame.gameMs - n.hitAtMs;
+      if (age < 0 || age > HIT_FADE_MS) continue;
+      const fade = 1 - age / HIT_FADE_MS;
+      const lane = n.note.lane;
+      const x = laneOriginX + lane * (laneWidth + c.laneGapPx);
+      drawHitGhost(
+        ctx,
+        x + 3,
+        hitLineY,
+        laneWidth - 6,
+        c.noteHeightPx,
+        LANE_COLORS[lane]!,
+        fade,
+      );
+    }
+
+    // Live notes.
     for (const n of frame.notes) {
       if (n.hit || n.missed) continue;
       const dt = n.startMs - frame.gameMs;
@@ -361,23 +388,68 @@ function drawTapNote(
   h: number,
   fill: string,
 ): void {
-  // Vertical gradient so notes read as glossy capsules rather than flat
-  // rectangles. Lighter at top, lane color at bottom, with a soft glow.
-  const grad = ctx.createLinearGradient(x, y, x, y + h);
-  grad.addColorStop(0, hexWithAlpha(fill, 1));
-  grad.addColorStop(0.5, hexWithAlpha(fill, 0.95));
-  grad.addColorStop(1, hexWithAlpha(fill, 0.7));
+  // Vertical gradient + specular highlight strip across the top so notes
+  // read as glossy capsules. The base gradient runs lane-color-to-darker;
+  // a second very-thin gradient at the top adds the "shiny" cap.
+  const baseGrad = ctx.createLinearGradient(x, y, x, y + h);
+  baseGrad.addColorStop(0, hexWithAlpha(fill, 1));
+  baseGrad.addColorStop(0.45, hexWithAlpha(fill, 0.95));
+  baseGrad.addColorStop(1, hexWithAlpha(fill, 0.75));
   ctx.save();
   ctx.shadowColor = fill;
-  ctx.shadowBlur = 12;
-  ctx.fillStyle = grad;
-  roundRect(ctx, x, y, w, h, 4);
+  ctx.shadowBlur = 14;
+  ctx.fillStyle = baseGrad;
+  roundRect(ctx, x, y, w, h, 6);
   ctx.fill();
   ctx.restore();
-  ctx.strokeStyle = "rgba(255,255,255,0.75)";
+
+  // Specular highlight: a 35%-height white-to-transparent gradient pinned
+  // to the top of the note that gives it a wet/shiny appearance.
+  const highlightH = Math.max(4, h * 0.35);
+  const hlGrad = ctx.createLinearGradient(x, y, x, y + highlightH);
+  hlGrad.addColorStop(0, "rgba(255,255,255,0.55)");
+  hlGrad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = hlGrad;
+  roundRect(ctx, x + 1, y + 1, w - 2, highlightH, 5);
+  ctx.fill();
+
+  // Crisp outline for legibility against bright video backgrounds.
+  ctx.strokeStyle = "rgba(255,255,255,0.85)";
   ctx.lineWidth = 1.5;
-  roundRect(ctx, x + 0.75, y + 0.75, w - 1.5, h - 1.5, 3.5);
+  roundRect(ctx, x + 0.75, y + 0.75, w - 1.5, h - 1.5, 5);
   ctx.stroke();
+}
+
+// Render a fading ghost of a successfully-hit note at the hit line.
+// Tells the player "your hit registered HERE" instead of letting the note
+// vanish into the void.
+function drawHitGhost(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  yCenter: number,
+  w: number,
+  h: number,
+  fill: string,
+  fade: number,
+): void {
+  ctx.save();
+  ctx.globalAlpha = fade;
+  ctx.shadowColor = fill;
+  ctx.shadowBlur = 22 * fade;
+  // Expand outward slightly as the ghost fades, so the eye reads it as
+  // "successful impact" rather than the note literally floating away.
+  const grow = (1 - fade) * 6;
+  const gx = x - grow / 2;
+  const gw = w + grow;
+  const gy = yCenter - (h + grow) / 2;
+  const gh = h + grow;
+  ctx.fillStyle = hexWithAlpha(fill, 0.85);
+  roundRect(ctx, gx, gy, gw, gh, 6);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.9)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawHoldNote(

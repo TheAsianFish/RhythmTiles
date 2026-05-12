@@ -3,7 +3,7 @@
 // A backend test guards drift between Pydantic and the schema. The extension
 // side stays manual; keep this file aligned by eye when the schema changes.
 
-export type Difficulty = "easy" | "normal" | "hard";
+export type Difficulty = "easy" | "normal" | "hard" | "expert";
 export type NoteType = "tap" | "hold";
 export type AudioSource = "youtube" | "upload" | "synthetic";
 

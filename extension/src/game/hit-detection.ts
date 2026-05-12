@@ -137,6 +137,7 @@ export function registerPress(input: RegisterPressInput): HitResult | null {
     note.holding = true;
   } else {
     note.hit = true;
+    note.hitAtMs = input.pressGameMs;
   }
   const combo = input.combo + 1;
   return {
