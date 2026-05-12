@@ -21,11 +21,13 @@ from app.models import (
     Note,
     PIPELINE_VERSION,
 )
+from app.config import settings
 from app.pipeline.beat_track import detect_beats
 from app.pipeline.difficulty import shape_difficulty
 from app.pipeline.hold_detect import detect_holds
 from app.pipeline.lane_assign import assign_lanes
 from app.pipeline.onset_detect import detect_onsets
+from app.pipeline.stems import separate_stems
 
 logger = logging.getLogger("beatbridge.pipeline")
 
@@ -121,7 +123,19 @@ def build_chart_from_audio(
     )
 
     beat_info = detect_beats(y=y, sr=sr)
-    onsets = detect_onsets(y=y, sr=sr)
+    # Stems are pass-through unless USE_DEMUCS=1 AND demucs is installed.
+    # When real, onset detection runs on the drum stem for cleaner rhythm
+    # extraction (kicks and snares dominate instead of competing with the
+    # full mix). Lane assignment still uses the full mix for spectral
+    # centroid so the band split logic stays unchanged.
+    stems = separate_stems(y, sr, use_demucs=settings.use_demucs)
+    onset_audio = stems.drums if stems.separated else y
+    onsets = detect_onsets(y=onset_audio, sr=sr)
+    if stems.separated:
+        logger.info(
+            "stems separated; onset detection ran on drum stem (%d onsets)",
+            len(onsets),
+        )
     beat_period_s: float | None = None
     if beat_info.bpm and beat_info.bpm > 0:
         beat_period_s = 60.0 / beat_info.bpm

@@ -327,6 +327,38 @@ def test_shape_difficulty_uniform_when_no_buckets() -> None:
     assert [n.t for n in without_buckets] == [n.t for n in with_uniform_buckets]
 
 
+def test_stems_pass_through_when_demucs_disabled() -> None:
+    import numpy as np
+
+    from app.pipeline.stems import separate_stems
+
+    y = np.zeros(22050, dtype=np.float32)  # 1s silence
+    sr = 22050
+    s = separate_stems(y, sr, use_demucs=False)
+    assert s.separated is False
+    # All channels share the same identity as the mix when separation is off.
+    assert s.drums is y
+    assert s.vocals is y
+    assert s.bass is y
+    assert s.other is y
+
+
+def test_stems_falls_back_gracefully_when_demucs_missing() -> None:
+    import numpy as np
+
+    from app.pipeline.stems import separate_stems
+
+    y = np.zeros(22050, dtype=np.float32)
+    sr = 22050
+    # use_demucs=True but demucs probably isn't installed in CI. The fallback
+    # path must return pass-through stems instead of raising.
+    s = separate_stems(y, sr, use_demucs=True)
+    # Whether or not demucs IS installed locally, this must return a Stems.
+    # If real separation ran, separated=True; if it fell back, separated=False.
+    assert s.sr == sr
+    assert s.drums is not None and s.vocals is not None
+
+
 def test_assign_lanes_no_chords_when_too_few_onsets() -> None:
     # Below MIN_ONSETS_FOR_CHORDS, the threshold is +inf so no chord can fire.
     onsets = [
