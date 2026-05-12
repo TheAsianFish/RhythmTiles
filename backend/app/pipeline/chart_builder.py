@@ -191,6 +191,7 @@ def build_chart_from_audio(
         difficulty=difficulty,
         beats=beat_info.beats,
         energy_buckets=energy_buckets,
+        song_duration_s=duration,
     )
     notes = detect_holds(
         notes=thinned,

@@ -28,16 +28,27 @@ _DENSITY_TARGETS = {
     "expert": 3.8,
 }
 
-# Fraction of scored candidates each difficulty keeps. Numbers picked so
-# the gap between adjacent tiers is meaningful (~1.5-2x) without any tier
-# crossing into button-mashing territory. Real counts are still driven by
-# the song's onset density.
-_KEEP_RATIOS = {
-    "easy":   0.28,
-    "normal": 0.50,
-    "hard":   0.72,
-    "expert": 0.92,
+# Target notes-per-second BAND per difficulty. The keep ratio is derived
+# per song: ratio = (target_mid * duration) / total_candidates, clamped to
+# [MIN_RATIO, MAX_RATIO]. This makes a difficulty feel similarly hard
+# across genres: a sparse ballad gets a higher ratio (keep more of what's
+# there), a dense EDM song gets a lower ratio (don't spam the player).
+# Fixed ratios trained on one song don't generalize; calibration does.
+#
+# Bands picked to feel right for typical pop/rock at ~120-180 BPM. Tune
+# with playtest data, or replace this dict with an ML-learned function
+# of (song features -> target rate) once we have replay ratings.
+TARGET_NOTES_PER_SEC = {
+    "easy":   (0.7, 1.5),
+    "normal": (1.5, 2.8),
+    "hard":   (3.0, 4.5),
+    "expert": (4.5, 6.5),
 }
+
+# Absolute bounds on the derived ratio so degenerate inputs (tiny or huge
+# candidate sets) don't push selection past sanity.
+_MIN_RATIO = 0.05
+_MAX_RATIO = 0.98
 
 # Energy-bucket bonus to keep_score: low energy verse notes get a small
 # discount, chorus notes get a small boost. Subtle so it complements
@@ -59,17 +70,35 @@ def shape_difficulty(
     difficulty: str,
     beats: list[float],
     energy_buckets: list[int] | None = None,
+    song_duration_s: float | None = None,
 ) -> list[RawNote]:
-    """Filter `notes` by per-note importance and the difficulty's keep ratio.
+    """Filter `notes` by per-note importance and a per-song calibrated keep ratio.
 
-    The returned list is time-sorted and respects chord pairs (if one
-    chord partner is kept, both are). After selection the sanity cap runs
-    to clamp humanly-impossible bursts.
+    The returned list is time-sorted and respects chord pairs (if one chord
+    partner is kept, both are). After selection the sanity cap runs to clamp
+    humanly-impossible bursts.
+
+    The keep ratio is no longer a fixed per-difficulty constant. It's derived
+    each call from the song's actual onset density: the difficulty supplies a
+    target notes-per-second BAND (TARGET_NOTES_PER_SEC), and we pick the
+    ratio that lands the chart in that band given the candidate count and
+    song duration. So Easy on a sparse ballad keeps a higher fraction than
+    Easy on a dense EDM track, but both end up at ~1 note/sec player rate.
+
+    `song_duration_s` overrides what we'd otherwise infer from `beats`. Pass
+    the audio duration when available for the most accurate calibration.
     """
     if not notes:
         return notes
 
-    keep_ratio = _KEEP_RATIOS.get(difficulty, _KEEP_RATIOS["normal"])
+    duration_s = _infer_duration(
+        notes=notes, beats=beats, song_duration_s=song_duration_s,
+    )
+    keep_ratio = _calibrated_ratio(
+        difficulty=difficulty,
+        n_candidates=len(notes),
+        duration_s=duration_s,
+    )
     chord_groups = _chord_groups(notes)
 
     # Score each note. Chord partners (multiple notes at the same t with
@@ -156,6 +185,38 @@ def _enforce_sanity_cap(notes: list[RawNote]) -> list[RawNote]:
             dropped[weakest] = True
 
     return [n for i, n in enumerate(notes) if not dropped[i]]
+
+
+def _calibrated_ratio(
+    *,
+    difficulty: str,
+    n_candidates: int,
+    duration_s: float,
+) -> float:
+    """Pick the keep ratio that lands this song in the difficulty's target rate band."""
+    lo, hi = TARGET_NOTES_PER_SEC.get(difficulty, TARGET_NOTES_PER_SEC["normal"])
+    target_mid = 0.5 * (lo + hi)
+    if n_candidates <= 0 or duration_s <= 0:
+        return 0.5
+    desired_total = target_mid * duration_s
+    ratio = desired_total / n_candidates
+    return max(_MIN_RATIO, min(_MAX_RATIO, ratio))
+
+
+def _infer_duration(
+    *,
+    notes: list[RawNote],
+    beats: list[float],
+    song_duration_s: float | None,
+) -> float:
+    """Best-effort song duration. Prefer the caller's value, then beats, then notes."""
+    if song_duration_s is not None and song_duration_s > 0:
+        return float(song_duration_s)
+    if beats and len(beats) >= 2:
+        return float(beats[-1])
+    if notes:
+        return float(notes[-1].t - notes[0].t) or 1.0
+    return 1.0
 
 
 def target_density(difficulty: str) -> float:

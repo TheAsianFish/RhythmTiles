@@ -62,15 +62,18 @@ def test_assign_lanes_drops_when_all_lanes_too_recent() -> None:
 
 
 def test_shape_difficulty_thins_dense_input() -> None:
-    # 60 notes spread over 10 seconds with VARIED strengths (so the selector
-    # has signal to rank instead of relying on tie-breaks). Easy keeps ~28%.
+    # 60 notes over 10s = 6 candidate/sec. Easy target 1.1 n/s ->
+    # ratio = 11/60 = 0.18 -> ~11 notes after selection. Allow a small
+    # window around that for floor/rounding effects.
     beats = [0.0 + i * 0.5 for i in range(21)]
     notes = [
         RawNote(t=i * 0.166, lane=i % 4, strength=0.2 + (i % 5) * 0.15)
         for i in range(60)
     ]
-    shaped = shape_difficulty(notes=notes, difficulty="easy", beats=beats)
-    assert 12 <= len(shaped) <= 22, f"expected ~17 notes, got {len(shaped)}"
+    shaped = shape_difficulty(
+        notes=notes, difficulty="easy", beats=beats, song_duration_s=10.0,
+    )
+    assert 8 <= len(shaped) <= 16, f"expected ~11 notes, got {len(shaped)}"
 
 
 def test_shape_difficulty_keeps_more_at_higher_difficulty() -> None:
@@ -92,6 +95,46 @@ def test_shape_difficulty_keeps_more_at_higher_difficulty() -> None:
 
 def test_shape_difficulty_handles_empty() -> None:
     assert shape_difficulty(notes=[], difficulty="normal", beats=[]) == []
+
+
+def test_shape_difficulty_calibrates_per_song() -> None:
+    # Two synthetic songs, same duration, different candidate density.
+    # Easy should keep MORE of the sparse song and LESS of the dense song,
+    # so the player-perceived rate stays in the same band either way.
+    duration = 100.0
+    beats = [i * 0.5 for i in range(int(duration / 0.5) + 1)]
+    sparse = [
+        RawNote(t=i * 2.0, lane=i % 4, strength=0.3 + (i % 7) * 0.1)
+        for i in range(50)  # 0.5 candidate/sec
+    ]
+    dense = [
+        RawNote(t=i * 0.2, lane=i % 4, strength=0.3 + (i % 7) * 0.1)
+        for i in range(500)  # 5 candidate/sec
+    ]
+    sparse_easy = shape_difficulty(
+        notes=sparse, difficulty="easy", beats=beats, song_duration_s=duration,
+    )
+    dense_easy = shape_difficulty(
+        notes=dense, difficulty="easy", beats=beats, song_duration_s=duration,
+    )
+    # The sparse song's Easy keep ratio must be HIGHER than the dense song's.
+    # That's the whole point of calibration: same difficulty adapts to what
+    # the song offers.
+    sparse_ratio = len(sparse_easy) / len(sparse)
+    dense_ratio = len(dense_easy) / len(dense)
+    assert sparse_ratio > dense_ratio, (
+        f"calibration failed: sparse ratio {sparse_ratio:.2f} "
+        f"not greater than dense ratio {dense_ratio:.2f}"
+    )
+    # The dense song has enough material to reach Easy's target band
+    # (0.7-1.5 n/s). The sparse song may fall BELOW the band because we
+    # never manufacture notes that aren't there: 50 candidates over 100s
+    # caps at 0.5 n/s no matter what ratio we pick. That's correct
+    # behaviour, not a bug.
+    dense_rate = len(dense_easy) / duration
+    assert 0.7 <= dense_rate <= 1.8, f"dense rate out of band: {dense_rate}"
+    # Sparse should keep nearly all of what's there since material is scarce.
+    assert sparse_ratio >= 0.85, f"sparse should keep most of its scarce material: {sparse_ratio}"
 
 
 def test_shape_difficulty_sanity_caps_unplayable_bursts() -> None:
