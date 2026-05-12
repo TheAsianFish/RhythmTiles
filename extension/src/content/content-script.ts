@@ -214,10 +214,13 @@ function isWatchUrl(): boolean {
 
 // Called when YouTube navigates between videos in the same tab (autoplay
 // queue, suggested-video click, prev/next, channel page → video). The user
-// asked for the game to recompute automatically without reloading the
-// extension; tear down the current game and re-run startGame with the same
-// difficulty for the new videoId. The video is paused for the duration of
-// chart generation so autoplay doesn't burn through the first verse.
+// explicitly asked NOT to tear down the overlay between songs: keep it
+// open, pause the new video, swap the <video> element bindings, and ask
+// the overlay to drop into its menu state so the user can review settings
+// and click Start when ready. The new chart is NOT fetched automatically;
+// the menu's Start button triggers BB_REQUEST_NEW_CHART which routes to
+// the same regenerateChart() path as the in-game menu's "change
+// difficulty" flow.
 async function handleNavigationChange(): Promise<void> {
   if (!activeDifficulty || !overlay) return;
   const newVideoId = getVideoId();
@@ -225,26 +228,66 @@ async function handleNavigationChange(): Promise<void> {
   console.log("[BeatBridge] SPA navigation detected", {
     from: activeVideoId, to: newVideoId, href: location.href,
   });
-  const diff = activeDifficulty;
-  // Snapshot and pause the new video element NOW (before tearing down) so
-  // autoplay can't start playing audio we have no chart for yet.
+  // Snapshot and pause the new video element NOW so autoplay can't start
+  // playing audio we have no chart for yet.
   const incomingVideo = findVideoElement();
   try { incomingVideo?.pause(); } catch { /* ignore */ }
-  removeOverlay();
-  if (!isWatchUrl() || !newVideoId) return;
-  // Give YouTube a tick to finish swapping <video> internals before we
-  // re-resolve duration and request a chart.
-  await new Promise((r) => setTimeout(r, 350));
-  console.log("[BeatBridge] auto-restarting game for new videoId", newVideoId);
-  const res = await startGame(diff);
-  if (!res.ok) {
-    console.warn("[BeatBridge] auto-restart failed:", res.error);
+  if (!isWatchUrl() || !newVideoId) {
+    // Navigated off /watch entirely. Close the overlay since there's no
+    // video to play against.
+    removeOverlay();
     return;
   }
-  // Chart is loaded and overlay is mounted. Resume playback; the first
-  // BB_VIDEO_PLAYING for a fresh chart bypasses the countdown, so the song
-  // starts immediately alongside the game.
-  try { videoEl?.play().catch(() => {}); } catch { /* ignore */ }
+  // Give YouTube a tick to finish swapping <video> internals before we
+  // re-bind listeners and the clock bridge.
+  await new Promise((r) => setTimeout(r, 350));
+  const refreshed = findVideoElement();
+  if (!refreshed) {
+    console.warn("[BeatBridge] no video element after navigation");
+    return;
+  }
+  // Re-bind: detach listeners from the OLD videoEl reference, attach to
+  // the new one. The clock-bridge interval reads videoEl on each tick so
+  // updating the variable is enough.
+  detachVideoListeners();
+  videoEl = refreshed;
+  attachVideoListenersFor(videoEl);
+  try { videoEl.pause(); } catch { /* ignore */ }
+  // Tell the overlay a new video is loaded and to open the menu so the
+  // player can choose settings and click Start. We forget the active
+  // chart's videoId so the overlay's chartReady flag resets.
+  activeVideoId = newVideoId;
+  overlay.contentWindow?.postMessage(
+    { type: "BB_NEW_VIDEO", videoId: newVideoId }, "*",
+  );
+}
+
+// Attach the pause / play / seeked listeners to a given <video> element.
+// Extracted from startGame so handleNavigationChange can re-bind to the
+// new video element without rerunning chart generation.
+function attachVideoListenersFor(v: HTMLVideoElement): void {
+  if (!overlay) return;
+  const iframe = overlay;
+  const onPause = () => iframe.contentWindow?.postMessage({ type: "BB_VIDEO_PAUSED" }, "*");
+  const onPlay = () => iframe.contentWindow?.postMessage({ type: "BB_VIDEO_PLAYING" }, "*");
+  const onSeek = () => {
+    iframe.contentWindow?.postMessage(
+      {
+        type: "BB_VIDEO_SEEKED",
+        currentTime: v.currentTime,
+        wasPlaying: !v.paused && !v.ended,
+      },
+      "*",
+    );
+  };
+  v.addEventListener("pause", onPause);
+  v.addEventListener("play", onPlay);
+  v.addEventListener("seeked", onSeek);
+  videoListeners = [
+    { type: "pause", fn: onPause },
+    { type: "play", fn: onPlay },
+    { type: "seeked", fn: onSeek },
+  ];
 }
 
 function attachNavigationWatch(): void {
@@ -419,35 +462,9 @@ async function startGame(difficulty: Difficulty) {
   // The overlay's pre-React message buffer will catch it.
   const fallbackTimer = window.setTimeout(() => sendChart("1s-fallback"), 1000);
 
-  // Pause/resume game when the user scrubs or pauses the video. Tracked in
-  // videoListeners so a subsequent Start Game (or close) can detach them.
+  // Pause/resume/seek listeners. Re-bound on SPA nav via the same helper.
   detachVideoListeners();
-  const onPause = () => iframe.contentWindow?.postMessage({ type: "BB_VIDEO_PAUSED" }, "*");
-  const onPlay = () => iframe.contentWindow?.postMessage({ type: "BB_VIDEO_PLAYING" }, "*");
-  const onSeek = () => {
-    const v = videoEl;
-    if (!v) return;
-    // wasPlaying tells the overlay whether to trigger a countdown after the
-    // seek. Scrubbing while playing -> pause, 3-2-1, resume from new pos.
-    // Scrubbing while paused -> just update position; the countdown will
-    // run when the user hits play, via the existing mid-song-resume path.
-    iframe.contentWindow?.postMessage(
-      {
-        type: "BB_VIDEO_SEEKED",
-        currentTime: v.currentTime,
-        wasPlaying: !v.paused && !v.ended,
-      },
-      "*",
-    );
-  };
-  videoEl.addEventListener("pause", onPause);
-  videoEl.addEventListener("play", onPlay);
-  videoEl.addEventListener("seeked", onSeek);
-  videoListeners = [
-    { type: "pause", fn: onPause },
-    { type: "play", fn: onPlay },
-    { type: "seeked", fn: onSeek },
-  ];
+  attachVideoListenersFor(videoEl);
 
   startClockBridge();
 

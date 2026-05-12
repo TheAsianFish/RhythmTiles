@@ -358,6 +358,33 @@ function App() {
           setErrorMsg((m.error as string) || "Chart generation failed.");
           break;
         }
+        case "BB_NEW_VIDEO": {
+          // SPA navigation: YouTube changed the video without a page reload.
+          // We keep the overlay open and drop into the menu state with the
+          // previous difficulty pre-selected; the user reviews settings and
+          // clicks Start to generate a chart for the new song. The video
+          // is already paused (content script paused it before sending us
+          // this message).
+          console.log("[BeatBridge] overlay received BB_NEW_VIDEO", m.videoId);
+          cancelCountdown();
+          loopRef.current?.pause();
+          setResults(null);
+          setChart(null);
+          setChartReady(false);
+          setVideoId((m.videoId as string) || "");
+          everPlayedRef.current = false;
+          // Open the menu pre-loaded with current settings and the
+          // last-used difficulty. The user clicks Start when they're
+          // ready to commit to a chart fetch.
+          void (async () => {
+            const s = await loadSettings();
+            setMenuSettings(s);
+            setMenuOpen(true);
+            setMenuLoading(false);
+            setErrorMsg(null);
+          })();
+          break;
+        }
         case "BB_VIDEO_PAUSED":
           clockRef.current.paused = true;
           // Ignore the pause we triggered ourselves to run the countdown.
