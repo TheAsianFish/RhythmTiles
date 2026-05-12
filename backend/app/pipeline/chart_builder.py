@@ -22,12 +22,18 @@ from app.models import (
     PIPELINE_VERSION,
 )
 from app.config import settings
+from app.ml import onset_cache
 from app.pipeline.beat_fill import add_subdivision_onsets, fill_empty_beats
 from app.pipeline.beat_track import detect_beats
 from app.pipeline.difficulty import shape_difficulty
 from app.pipeline.hold_detect import detect_holds
 from app.pipeline.lane_assign import assign_lanes
-from app.pipeline.onset_detect import detect_onsets, snap_onsets_to_beats
+from app.pipeline.onset_detect import (
+    detect_onsets,
+    detect_onsets_per_stem,
+    merge_onset_lists,
+    snap_onsets_to_beats,
+)
 from app.pipeline.stems import separate_stems
 
 logger = logging.getLogger("beatbridge.pipeline")
@@ -49,10 +55,14 @@ _DIFFICULTY_TUNING = {
     # chord groups, tuned together with the centroid threshold. Was
     # 0.98-0.90 (too few chords); these widen the strength gate so the
     # centroid gate becomes the dominant filter.
-    "easy":   {"chord_quantile": 0.97, "hold_ratio": 0.02},
-    "normal": {"chord_quantile": 0.95, "hold_ratio": 0.05},
-    "hard":   {"chord_quantile": 0.92, "hold_ratio": 0.08},
-    "expert": {"chord_quantile": 0.90, "hold_ratio": 0.12},
+    # hold_ratio cut roughly in half across all tiers. Sliders were stacking
+    # too thickly through sustained vocal regions and felt like a different
+    # instrument from the tap stream. Keeping them rare makes each one read
+    # as a deliberate musical moment rather than ambient noise.
+    "easy":   {"chord_quantile": 0.97, "hold_ratio": 0.01},
+    "normal": {"chord_quantile": 0.95, "hold_ratio": 0.025},
+    "hard":   {"chord_quantile": 0.92, "hold_ratio": 0.04},
+    "expert": {"chord_quantile": 0.90, "hold_ratio": 0.06},
 }
 
 
@@ -123,12 +133,20 @@ def build_chart_from_audio(
     difficulty: str,
     audio_source: str = "upload",
     video_id: str | None = None,
+    use_beat_this: bool | None = None,
+    use_demucs: bool | None = None,
 ) -> Chart:
     """Run the full pipeline on the given audio. Returns Chart.
+
+    `use_beat_this` and `use_demucs` override the env-driven defaults for
+    this one call. Pass them when benchmarking, testing, or otherwise
+    needing to force the heuristic baseline (or force ML) without
+    touching environment variables. None = use settings.
 
     Raises NotImplementedError only if librosa is unavailable. The pipeline
     itself is implemented in Stage 2; this entry point ties it together.
     """
+    use_demucs_eff = settings.use_demucs if use_demucs is None else use_demucs
     try:
         y, sr = load_audio_to_mono(audio_bytes)
     except Exception as exc:  # pragma: no cover
@@ -145,20 +163,67 @@ def build_chart_from_audio(
         duration,
     )
 
-    beat_info = detect_beats(y=y, sr=sr)
+    beat_info = detect_beats(
+        y=y, sr=sr, content_hash=content_hash, use_beat_this=use_beat_this,
+    )
+    logger.info(
+        "beat tracking source=%s bpm=%.1f beats=%d downbeats=%d",
+        beat_info.source,
+        beat_info.bpm,
+        len(beat_info.beats),
+        len(beat_info.downbeats or ()),
+    )
     # Stems are pass-through unless USE_DEMUCS=1 AND demucs is installed.
-    # When real, onset detection runs on the drum stem for cleaner rhythm
-    # extraction (kicks and snares dominate instead of competing with the
-    # full mix). Lane assignment still uses the full mix for spectral
-    # centroid so the band split logic stays unchanged.
-    stems = separate_stems(y, sr, use_demucs=settings.use_demucs)
-    onset_audio = stems.drums if stems.separated else y
-    onsets = detect_onsets(y=onset_audio, sr=sr)
-    if stems.separated:
+    # When real, run onset detection PER STEM (drums + vocals) so each
+    # onset carries the instrument it came from. The lane assigner uses
+    # the stem tag to route drums to lanes 0/1 (left hand) and vocals to
+    # lanes 2/3 (right hand), which is much cleaner than the full-mix
+    # spectral-centroid heuristic on songs where vocals and drums share
+    # a frequency band. See Phase 2 of docs/ML_PLAN.md.
+    # Per-stem onset detection is the slowest stage when active (Demucs
+    # is minutes on CPU). Its output is difficulty-independent, so we
+    # cache it by audio content hash and skip Demucs entirely on repeat
+    # generations of the same audio at different difficulties.
+    cached_stem_onsets: list = []
+    if use_demucs_eff:
+        cached_stem_onsets = onset_cache.get(
+            content_hash=content_hash, source="per-stem",
+        ) or []
+
+    if cached_stem_onsets:
+        onsets = cached_stem_onsets
+        drum_count = sum(1 for o in onsets if o.stem == "drums")
+        vocal_count = sum(1 for o in onsets if o.stem == "vocals")
         logger.info(
-            "stems separated; onset detection ran on drum stem (%d onsets)",
-            len(onsets),
+            "per-stem onset cache hit total=%d drums=%d vocals=%d residual=%d",
+            len(onsets), drum_count, vocal_count,
+            len(onsets) - drum_count - vocal_count,
         )
+    else:
+        stems = separate_stems(y, sr, use_demucs=use_demucs_eff)
+        if stems.separated:
+            onsets = detect_onsets_per_stem(
+                drums=stems.drums, vocals=stems.vocals, sr=sr,
+            )
+            # Merge in a residual pass on the full mix so anything that
+            # lives outside the drum/vocal stems (bright synth stabs in
+            # "other", bass plucks) still produces notes. The per-stem
+            # detections win the dedupe because they're processed first.
+            residual = detect_onsets(y=y, sr=sr)
+            onsets = merge_onset_lists(onsets, residual)
+            drum_count = sum(1 for o in onsets if o.stem == "drums")
+            vocal_count = sum(1 for o in onsets if o.stem == "vocals")
+            logger.info(
+                "per-stem onsets total=%d drums=%d vocals=%d residual=%d",
+                len(onsets), drum_count, vocal_count,
+                len(onsets) - drum_count - vocal_count,
+            )
+            # Cache for future regenerations at other difficulties.
+            onset_cache.put(
+                content_hash=content_hash, source="per-stem", onsets=onsets,
+            )
+        else:
+            onsets = detect_onsets(y=y, sr=sr)
     # Beat-snap: onsets within ~22ms of a beat get pulled to the beat
     # exactly. Removes the ~10-30ms perceptual offset that survives even
     # with backtracking on.
@@ -167,7 +232,9 @@ def build_chart_from_audio(
     # vocal-only choruses don't go dead. Runs on the full-mix beat grid
     # regardless of stem path. See app/pipeline/beat_fill.py.
     onsets_before_fill = len(onsets)
-    onsets = fill_empty_beats(onsets, beat_info.beats)
+    onsets = fill_empty_beats(
+        onsets, beat_info.beats, downbeats=beat_info.downbeats,
+    )
     if len(onsets) != onsets_before_fill:
         logger.info(
             "beat-grid fill added %d synthetic onsets to cover empty runs",
@@ -196,6 +263,10 @@ def build_chart_from_audio(
         sr=sr,
         beat_period_s=beat_period_s,
         chord_quantile=tuning["chord_quantile"],
+        # Downbeats come from Beat This! (Phase 1 ML). When None (librosa
+        # fallback), the lane assigner falls back to the strength+centroid
+        # accent gate it has always used.
+        downbeats=beat_info.downbeats,
     )
     energy_buckets = _energy_buckets_for_notes(notes=raw_notes, y=y, sr=sr)
     thinned = shape_difficulty(
@@ -214,6 +285,9 @@ def build_chart_from_audio(
         max_hold_ratio=tuning["hold_ratio"],
     )
 
+    # AudioMeta.bpmCurve is the wire-format tempo curve. tuple-of-pairs in
+    # Pydantic comes through fine, but BeatInfo carries it as a list[tuple]
+    # which is exactly the expected shape. None passes through too.
     return Chart(
         audio=AudioMeta(
             source=audio_source if audio_source in {"youtube", "upload", "synthetic"} else "upload",

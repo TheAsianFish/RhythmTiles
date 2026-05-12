@@ -53,6 +53,13 @@ MIN_ONSETS_FOR_CHORDS = 24
 # land chord rate in 3-6% on typical pop tracks.
 CHORD_ACCENT_MIN_CENTROID_HZ = 2800.0
 
+# Maximum time gap between an onset and the nearest downbeat for the
+# onset to count as a downbeat accent. Beat This!'s downbeat times are
+# usually within a few ms of the true bar start, but our onsets can be
+# backtracked ~10-30ms earlier; widen the window so we don't miss the
+# chord on the very note that the downbeat names.
+DOWNBEAT_ACCENT_TOLERANCE_S = 0.050
+
 # Onsets closer than this in time count as part of a stream. Stream onsets
 # get hand-balanced. The default 0.25s corresponds to 1/2 beat at 120 BPM;
 # callers with a known beat period can override via beat_period_s.
@@ -86,13 +93,21 @@ def assign_lanes(
     sr: int,
     beat_period_s: float | None = None,
     chord_quantile: float = CHORD_STRENGTH_QUANTILE,
+    downbeats: list[float] | None = None,
 ) -> list[RawNote]:
     """Greedy left-to-right assignment honouring frequency, anti-cluster,
-    hand-balance, and chord rules.
+    hand-balance, stem source (when present on the onset), and chord rules.
 
     `chord_quantile` lets the caller tune chord density per difficulty:
     higher values (closer to 1.0) emit fewer chords, lower values emit more.
     Default matches the module-level CHORD_STRENGTH_QUANTILE.
+
+    `downbeats` is the list of bar-start times from Beat This! (Phase 1 of
+    docs/ML_PLAN.md). When provided, any onset within
+    DOWNBEAT_ACCENT_TOLERANCE_S of a downbeat is treated as a chord-accent
+    regardless of strength/centroid: a downbeat is a real musical accent and
+    a chord stack there matches what mappers do. Onsets away from downbeats
+    still follow the strength+centroid accent rule.
     """
     if not onsets:
         return []
@@ -102,13 +117,16 @@ def assign_lanes(
         cutoff = FALLBACK_CUTOFF_HZ
 
     # Chord emission: only fires on ACCENT events - top-quantile strength
-    # AND high spectral centroid (cymbal/snare/crash territory). The old
-    # rule fired on any strong onset, which auto-paired single piano notes
-    # and drum hits into fake chords. The new rule lands chord stacks
-    # mostly on cymbal crashes and bright accent moments. Target rate:
-    # 3-8% of notes in chord groups. The caller can also pass
-    # chord_quantile=1.0 to disable chord emission entirely.
+    # AND high spectral centroid (cymbal/snare/crash territory) OR a real
+    # downbeat from Beat This! when available. The old rule fired on any
+    # strong onset, which auto-paired single piano notes and drum hits
+    # into fake chords. The new rule lands chord stacks mostly on cymbal
+    # crashes, bright accent moments, and real bar starts. Target rate:
+    # 3-8% of notes in chord groups. The caller can pass chord_quantile=1.0
+    # to disable strength-based chord emission entirely; downbeat-based
+    # chords still fire when downbeats are provided.
     chord_threshold = _chord_threshold(onsets, quantile=chord_quantile)
+    downbeat_set = sorted(downbeats) if downbeats else None
     stream_gap_s = (beat_period_s * 0.5) if beat_period_s else DEFAULT_STREAM_GAP_S
 
     notes: list[RawNote] = []
@@ -119,15 +137,41 @@ def assign_lanes(
     last_hand = -1
     prev_t = -1e9
 
+    # Index pointer into downbeat_set; we walk onsets in time order so
+    # this only moves forward (avoids an O(n*m) scan per onset).
+    db_idx = 0
+    n_downbeats = len(downbeat_set) if downbeat_set else 0
+
     for onset in onsets:
-        low = onset.centroid_hz < cutoff
+        # Stem source overrides centroid when present (Phase 2 of the ML
+        # plan): drum and bass onsets get routed to the LOW band (lanes
+        # 0/1), vocal onsets to the HIGH band (lanes 2/3). When the onset
+        # carries no stem label (heuristic fallback or "other" stem), we
+        # fall back to the centroid-based band split. This matches the
+        # "drum stems route by instrument rather than band" intuition in
+        # docs/DECISIONS.md and gives kick/snare lines a consistent home
+        # on the left hand even on bright-heavy mixes where the centroid
+        # would otherwise float them to the right.
+        low = _band_from_onset(onset, cutoff=cutoff)
         t_rounded = round(float(onset.t), 4)
         in_stream = (onset.t - prev_t) < stream_gap_s
 
+        # Walk db_idx forward to the nearest downbeat at or before this
+        # onset; check both that and the next one for the smallest delta.
+        on_downbeat = False
+        if downbeat_set:
+            while db_idx + 1 < n_downbeats and downbeat_set[db_idx + 1] <= onset.t:
+                db_idx += 1
+            cand = abs(downbeat_set[db_idx] - onset.t)
+            if db_idx + 1 < n_downbeats:
+                cand = min(cand, abs(downbeat_set[db_idx + 1] - onset.t))
+            on_downbeat = cand <= DOWNBEAT_ACCENT_TOLERANCE_S
+
         # Accent-chord: top-quantile strength AND high centroid (bright
-        # event = cymbal / crash / bright accent). Both gates needed so
-        # a loud kick (high strength, low centroid) doesn't become a chord.
-        is_accent = (
+        # event = cymbal / crash / bright accent), OR a real downbeat from
+        # the ML beat tracker. The strength/centroid path stays in for the
+        # librosa fallback (no downbeats) and for accents between bars.
+        is_accent = on_downbeat or (
             onset.strength >= chord_threshold
             and onset.centroid_hz >= CHORD_ACCENT_MIN_CENTROID_HZ
         )
@@ -241,3 +285,19 @@ def _median_centroid(onsets: list[Onset]) -> float:
         return 0.0
     mid = n // 2
     return vals[mid] if n % 2 else 0.5 * (vals[mid - 1] + vals[mid])
+
+
+def _band_from_onset(onset: Onset, *, cutoff: float) -> bool:
+    """Return True for low-band (lanes 0/1), False for high-band (lanes 2/3).
+
+    Stem labels (set by per-stem onset detection in the Demucs path)
+    take precedence over centroid. drums/bass -> low, vocals -> high,
+    anything else (or no stem) -> centroid split. The centroid fallback
+    is what we did pre-stems and what the heuristic pipeline still does.
+    """
+    stem = getattr(onset, "stem", None)
+    if stem == "drums" or stem == "bass":
+        return True
+    if stem == "vocals":
+        return False
+    return onset.centroid_hz < cutoff

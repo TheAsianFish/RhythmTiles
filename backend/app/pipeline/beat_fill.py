@@ -77,12 +77,29 @@ CRESCENDO_RISE_FRACTION = 0.07
 MIN_CRESCENDO_BEATS = 3
 
 
-def fill_empty_beats(onsets: list[Onset], beats: list[float]) -> list[Onset]:
-    """Return `onsets` augmented with synthetic events at long empty runs."""
+def fill_empty_beats(
+    onsets: list[Onset],
+    beats: list[float],
+    *,
+    downbeats: list[float] | None = None,
+) -> list[Onset]:
+    """Return `onsets` augmented with synthetic events at long empty runs.
+
+    When `downbeats` is provided (Beat This! path), any empty downbeat is
+    filled regardless of run length. A bar start is a strong musical
+    moment even if the inner beats are quiet; leaving it empty produces
+    the "song dropped out then the chart skipped a beat" feel that the
+    fill pass exists to prevent. Inner empty beats still need a run of
+    MIN_EMPTY_RUN_BEATS to fill.
+    """
     if not beats or len(beats) < 2:
         return onsets
     onset_times = sorted(o.t for o in onsets)
     has_onset = _per_beat_coverage(beats=beats, onset_times=onset_times)
+
+    downbeat_beat_indices: set[int] = set()
+    if downbeats:
+        downbeat_beat_indices = _beats_at_downbeats(beats=beats, downbeats=downbeats)
 
     augmented = list(onsets)
     i = 0
@@ -95,19 +112,57 @@ def fill_empty_beats(onsets: list[Onset], beats: list[float]) -> list[Onset]:
         while i < len(has_onset) and not has_onset[i]:
             i += 1
         run_len = i - start
+        # Always fill any downbeat inside this run, even if the run is
+        # shorter than MIN_EMPTY_RUN_BEATS.
         if run_len < MIN_EMPTY_RUN_BEATS:
+            for k in range(start, i):
+                if k in downbeat_beat_indices:
+                    augmented.append(_synth_onset_at(beats[k], k))
             continue
         for k in range(start, i):
-            augmented.append(
-                Onset(
-                    t=float(beats[k]),
-                    strength=SYNTH_STRENGTH,
-                    centroid_hz=SYNTH_CENTROIDS[k % 2],
-                ),
-            )
+            augmented.append(_synth_onset_at(beats[k], k))
 
     augmented.sort(key=lambda o: o.t)
     return augmented
+
+
+def _synth_onset_at(t: float, beat_index: int) -> Onset:
+    """One synthetic Onset on the beat grid, alternating centroid between bands."""
+    return Onset(
+        t=float(t),
+        strength=SYNTH_STRENGTH,
+        centroid_hz=SYNTH_CENTROIDS[beat_index % 2],
+    )
+
+
+def _beats_at_downbeats(
+    *,
+    beats: list[float],
+    downbeats: list[float],
+    tolerance_s: float = 0.10,
+) -> set[int]:
+    """Return the set of beat indices whose time is closest to a downbeat.
+
+    Beat This! reports beats and downbeats from independent heads; the
+    downbeat times usually coincide with beat times but can drift by a
+    few ms. Match each downbeat to its nearest beat to get the index we
+    care about.
+    """
+    out: set[int] = set()
+    if not downbeats:
+        return out
+    sorted_beats = beats
+    j = 0
+    n = len(sorted_beats)
+    for db in downbeats:
+        while j + 1 < n and sorted_beats[j + 1] <= db:
+            j += 1
+        candidate = j
+        if j + 1 < n and abs(sorted_beats[j + 1] - db) < abs(sorted_beats[candidate] - db):
+            candidate = j + 1
+        if abs(sorted_beats[candidate] - db) <= tolerance_s:
+            out.add(candidate)
+    return out
 
 
 def _per_beat_coverage(*, beats: list[float], onset_times: list[float]) -> list[bool]:

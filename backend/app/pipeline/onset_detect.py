@@ -50,6 +50,11 @@ class Onset:
     t: float                # seconds from audio start
     strength: float         # normalized onset strength, 0-1
     centroid_hz: float      # spectral centroid at the onset frame
+    # Stem of origin when per-stem onset detection ran (Demucs path).
+    # One of "drums", "vocals", "bass", "other", or None when the onset
+    # came from the full-mix detector. The lane assigner uses this to
+    # route by instrument rather than spectral band when available.
+    stem: str | None = None
 
 
 def detect_onsets(*, y: "np.ndarray", sr: int, hop_length: int = 256) -> list[Onset]:
@@ -144,6 +149,78 @@ def _onsets_from_envelope(
             Onset(t=float(t), strength=float(s), centroid_hz=float(centroid[f])),
         )
     return result
+
+
+def detect_onsets_per_stem(
+    *,
+    drums: "np.ndarray",
+    vocals: "np.ndarray",
+    sr: int,
+    hop_length: int = 256,
+) -> list[Onset]:
+    """Run onset detection per stem and tag each onset with its source.
+
+    Phase 2 of docs/ML_PLAN.md. Called by chart_builder when Demucs has
+    produced real stems. The drum stem is where the rhythm lives (kick,
+    snare, hat) so we run the energy detector there. The vocal stem
+    carries the melody so we run the energy detector on it too; melodic
+    attacks become onsets that the lane assigner routes to lanes 2-3 via
+    the stem label (see lane_assign._band_from_onset).
+
+    Bass and "other" are intentionally skipped:
+      - bass tracks the kick on most pop, so adding it would double-count.
+      - "other" is a residual stem that often contains reverb tails and
+        synth pads with no clean onset shape.
+
+    The two stem-tagged lists are merged with the same centroid-aware
+    dedupe as the full-mix path so simultaneous drum+vocal events at the
+    same instant aren't flattened.
+    """
+    drum_onsets = _onsets_for_stem(
+        y=drums, sr=sr, hop_length=hop_length, stem_name="drums",
+    )
+    vocal_onsets = _onsets_for_stem(
+        y=vocals, sr=sr, hop_length=hop_length, stem_name="vocals",
+    )
+    return _merge_onset_lists(drum_onsets, vocal_onsets)
+
+
+def _onsets_for_stem(
+    *,
+    y: "np.ndarray",
+    sr: int,
+    hop_length: int,
+    stem_name: str,
+) -> list[Onset]:
+    """Energy-envelope onset detection on a single stem.
+
+    Centroid is sampled on the stem itself (not the full mix) so the
+    chord-accent gate still works: a cymbal crash in the drum stem will
+    show a high centroid, a low-frequency kick will show low, exactly as
+    on the mix. We don't bother with the CQT/HPSS branches the full-mix
+    detector uses; stems are already source-separated.
+    """
+    import librosa  # noqa: WPS433
+
+    centroid = librosa.feature.spectral_centroid(y=y, sr=sr, hop_length=hop_length)[0]
+    n_frames = int(len(centroid))
+    onsets = _onsets_from_envelope(
+        y=y, sr=sr, hop_length=hop_length, feature="energy",
+        centroid=centroid, n_frames=n_frames,
+    )
+    for o in onsets:
+        o.stem = stem_name
+    return onsets
+
+
+def merge_onset_lists(a: list[Onset], b: list[Onset]) -> list[Onset]:
+    """Public wrapper around the centroid-aware dedupe merge.
+
+    Used by chart_builder when stem onsets and full-mix residual onsets
+    need to be combined; also re-exported as _merge_onset_lists for the
+    handful of tests that pre-date the rename.
+    """
+    return _merge_onset_lists(a, b)
 
 
 def _merge_onset_lists(a: list[Onset], b: list[Onset]) -> list[Onset]:
