@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { backendUrl, pingHealthDetailed } from "@/api/backend-client";
 import type { Difficulty } from "@/types/chart";
@@ -11,12 +11,18 @@ function App() {
   const [difficulty, setDifficulty] = useState<Difficulty>("normal");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Keep a ref so the interval callback can read the latest status without
+  // being in the effect deps (which would cause an infinite re-run loop).
+  const statusRef = useRef<BackendStatus>("unknown");
 
   const refreshHealth = useCallback(async () => {
     setStatus("unknown");
+    statusRef.current = "unknown";
     setHealthError(null);
     const ping = await pingHealthDetailed();
-    setStatus(ping.ok ? "ok" : "down");
+    const next: BackendStatus = ping.ok ? "ok" : "down";
+    setStatus(next);
+    statusRef.current = next;
     setHealthError(ping.ok ? null : ping.error ?? "unknown error");
   }, []);
 
@@ -24,11 +30,14 @@ function App() {
     void refreshHealth();
     // Re-check while the popup is open so the user doesn't get stuck on
     // a stale "down" if they boot the server after opening the popup.
+    // statusRef avoids including status in the deps, which would cause
+    // refreshHealth to be called on every state change and loop forever.
     const id = window.setInterval(() => {
-      if (status !== "ok") void refreshHealth();
+      if (statusRef.current !== "ok") void refreshHealth();
     }, 3000);
     return () => window.clearInterval(id);
-  }, [refreshHealth, status]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshHealth]);
 
   async function onStart() {
     setBusy(true);
@@ -43,10 +52,21 @@ function App() {
         setError("Open a YouTube video first.");
         return;
       }
-      const resp = (await chrome.tabs.sendMessage(tab.id, {
-        type: "BB_START_GAME",
-        difficulty,
-      })) as { ok: boolean; error?: string } | undefined;
+
+      // Try sending the message. If the content script isn't injected yet
+      // (tab was open before the extension loaded), inject it first then retry.
+      let resp = await trySendStart(tab.id, difficulty);
+      if (resp === null) {
+        // Content script not present - inject it now.
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ["content-script.js"],
+        });
+        // Give the script a moment to register its listener.
+        await new Promise((r) => setTimeout(r, 150));
+        resp = await trySendStart(tab.id, difficulty);
+      }
+
       if (!resp || !resp.ok) {
         setError(resp?.error || "Content script did not respond. Reload the YouTube tab and try again.");
         return;
@@ -126,6 +146,23 @@ async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
       resolve(tabs[0]);
     });
   });
+}
+
+// Returns the response on success, null if the receiving end doesn't exist yet,
+// or throws on any other error.
+async function trySendStart(
+  tabId: number,
+  difficulty: string,
+): Promise<{ ok: boolean; error?: string } | null> {
+  try {
+    return (await chrome.tabs.sendMessage(tabId, {
+      type: "BB_START_GAME",
+      difficulty,
+    })) as { ok: boolean; error?: string } | undefined ?? null;
+  } catch (e) {
+    if ((e as Error).message?.includes("Receiving end does not exist")) return null;
+    throw e;
+  }
 }
 
 const root = document.getElementById("root");

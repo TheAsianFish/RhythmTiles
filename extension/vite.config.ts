@@ -46,7 +46,8 @@ export default defineConfig({
         overlay: resolve(__dirname, "src/overlay/overlay.html"),
         calibration: resolve(__dirname, "src/calibration/calibration.html"),
         "service-worker": resolve(__dirname, "src/background/service-worker.ts"),
-        "content-script": resolve(__dirname, "src/content/content-script.ts"),
+        // content-script is built separately via vite.content.config.ts as IIFE
+        // so it can be injected as a classic script without "type: module".
       },
       output: {
         // Predictable filenames so the manifest can reference them.

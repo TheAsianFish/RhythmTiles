@@ -2,26 +2,31 @@
 //
 // Positions are computed from gameTimeMs (audio-derived), never from rAF time.
 // The renderer is dumb: it draws what it's told. The game loop owns timing.
+//
+// Layout: lanes fill the canvas width with a small side margin. The canvas
+// itself is transparent so the panel's CSS gradient shows through. Notes get
+// a subtle border + glow to stay legible against arbitrary YouTube content.
 
 import type { NoteRuntime } from "@/game/types";
 
 export interface RenderConfig {
-  laneWidthPx: number;
+  sideMarginPx: number;        // horizontal padding inside the canvas
   laneGapPx: number;
   hitLineFromBottomPx: number;
   noteHeightPx: number;
-  // How many pixels per millisecond a note travels. Tunable for game feel.
-  pixelsPerMs: number;
+  pixelsPerMs: number;         // note travel speed
   opacity: number;
+  hudReservedTopPx: number;    // vertical space reserved for HUD text at the top
 }
 
 export const DEFAULT_RENDER_CONFIG: RenderConfig = {
-  laneWidthPx: 96,
+  sideMarginPx: 16,
   laneGapPx: 4,
-  hitLineFromBottomPx: 120,
-  noteHeightPx: 28,
-  pixelsPerMs: 0.6,
-  opacity: 0.92,
+  hitLineFromBottomPx: 100,
+  noteHeightPx: 22,
+  pixelsPerMs: 0.55,
+  opacity: 1.0,
+  hudReservedTopPx: 96,
 };
 
 const LANE_COLORS = ["#5fb7ff", "#a0e0ff", "#ffd28a", "#ff8aa0"];
@@ -72,86 +77,128 @@ export class CanvasRenderer {
     ctx.clearRect(0, 0, W, H);
 
     const c = this.config;
-    const totalLanesWidth = c.laneWidthPx * 4 + c.laneGapPx * 3;
-    const laneOriginX = Math.floor((W - totalLanesWidth) / 2);
+    const usableWidth = Math.max(0, W - c.sideMarginPx * 2);
+    const laneWidth = Math.max(20, (usableWidth - c.laneGapPx * 3) / 4);
+    const laneOriginX = c.sideMarginPx;
+    const totalLanesWidth = laneWidth * 4 + c.laneGapPx * 3;
     const hitLineY = H - c.hitLineFromBottomPx;
+    const lanesTop = c.hudReservedTopPx;
 
-    // Dim backdrop column so the lanes read against the video.
-    ctx.globalAlpha = 0.35 * c.opacity;
-    ctx.fillStyle = "#000";
-    ctx.fillRect(laneOriginX - 8, 0, totalLanesWidth + 16, H);
-
-    // Lane backgrounds.
-    ctx.globalAlpha = 0.55 * c.opacity;
+    // Soft lane backgrounds (very subtle - panel gradient shows through).
     for (let i = 0; i < 4; i++) {
-      const x = laneOriginX + i * (c.laneWidthPx + c.laneGapPx);
+      const x = laneOriginX + i * (laneWidth + c.laneGapPx);
       const pressed = frame.pressedLanes.has(i);
-      ctx.fillStyle = pressed ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.06)";
-      ctx.fillRect(x, 0, c.laneWidthPx, H);
+      ctx.globalAlpha = pressed ? 0.22 : 0.08;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x, lanesTop, laneWidth, H - lanesTop);
+      // Lane separator on the right edge.
+      if (i < 3) {
+        ctx.globalAlpha = 0.15;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(x + laneWidth, lanesTop, c.laneGapPx, H - lanesTop);
+      }
     }
 
     // Hit line.
-    ctx.globalAlpha = 0.9 * c.opacity;
+    ctx.globalAlpha = 0.85;
     ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(laneOriginX, hitLineY);
     ctx.lineTo(laneOriginX + totalLanesWidth, hitLineY);
     ctx.stroke();
 
-    // Notes.
+    // Notes with subtle outline + glow so they read on any background.
     ctx.globalAlpha = c.opacity;
     for (const n of frame.notes) {
       if (n.hit || n.missed) continue;
       const dt = n.startMs - frame.gameMs;
       const y = hitLineY - dt * c.pixelsPerMs;
-      // Skip notes off-screen.
-      if (y < -c.noteHeightPx || y > H + c.noteHeightPx) continue;
+      if (y < lanesTop - c.noteHeightPx || y > H + c.noteHeightPx) continue;
 
       const lane = n.note.lane;
-      const x = laneOriginX + lane * (c.laneWidthPx + c.laneGapPx);
+      const x = laneOriginX + lane * (laneWidth + c.laneGapPx);
+      const fill = LANE_COLORS[lane]!;
 
-      ctx.fillStyle = LANE_COLORS[lane]!;
       if (n.note.type === "hold") {
         const tailDt = n.endMs - frame.gameMs;
         const tailY = hitLineY - tailDt * c.pixelsPerMs;
         const top = Math.min(y, tailY);
         const height = Math.abs(y - tailY) + c.noteHeightPx;
-        ctx.fillRect(x + 4, top, c.laneWidthPx - 8, height);
+        drawNoteRect(ctx, x + 3, top, laneWidth - 6, height, fill);
       } else {
-        ctx.fillRect(x + 4, y - c.noteHeightPx / 2, c.laneWidthPx - 8, c.noteHeightPx);
+        drawNoteRect(ctx, x + 3, y - c.noteHeightPx / 2, laneWidth - 6, c.noteHeightPx, fill);
       }
     }
 
-    // Lane key labels under the hit line.
-    ctx.globalAlpha = 0.9 * c.opacity;
+    // Lane key labels below the hit line.
+    ctx.globalAlpha = 0.85;
     ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 18px ui-sans-serif, system-ui, sans-serif";
+    ctx.font = "bold 14px ui-sans-serif, system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     for (let i = 0; i < 4; i++) {
-      const x = laneOriginX + i * (c.laneWidthPx + c.laneGapPx) + c.laneWidthPx / 2;
-      ctx.fillText(LANE_KEYS[i]!, x, hitLineY + 32);
+      const x = laneOriginX + i * (laneWidth + c.laneGapPx) + laneWidth / 2;
+      ctx.fillText(LANE_KEYS[i]!, x, hitLineY + 22);
     }
 
-    // HUD text.
+    // HUD text at top of the panel.
     ctx.globalAlpha = 1.0;
     ctx.textAlign = "left";
     ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 24px ui-sans-serif, system-ui, sans-serif";
-    ctx.fillText(`Score ${frame.score}`, 24, 36);
-    ctx.font = "16px ui-sans-serif, system-ui, sans-serif";
-    ctx.fillText(`Combo ${frame.combo}x${frame.multiplier.toFixed(1)}`, 24, 60);
-    ctx.fillText(`Acc ${frame.accuracyPercent.toFixed(1)}%`, 24, 82);
+    ctx.font = "600 13px ui-sans-serif, system-ui, sans-serif";
+    ctx.fillText("SCORE", c.sideMarginPx, 18);
+    ctx.font = "bold 28px ui-sans-serif, system-ui, sans-serif";
+    ctx.fillText(formatScore(frame.score), c.sideMarginPx, 46);
 
-    // Judgment text near hit line.
-    if (frame.lastJudgment && frame.gameMs - frame.lastJudgment.atMs < 250) {
+    ctx.font = "12px ui-sans-serif, system-ui, sans-serif";
+    ctx.fillStyle = "#b8c3d3";
+    ctx.fillText(`Combo x${frame.combo}`, c.sideMarginPx, 66);
+    ctx.fillText(`Acc ${frame.accuracyPercent.toFixed(1)}%`, c.sideMarginPx, 84);
+
+    // Judgment text near hit line, centered across the lanes.
+    if (frame.lastJudgment && frame.gameMs - frame.lastJudgment.atMs < 350) {
+      const age = frame.gameMs - frame.lastJudgment.atMs;
+      const fade = Math.max(0, 1 - age / 350);
+      ctx.globalAlpha = fade;
       ctx.textAlign = "center";
-      ctx.font = "bold 28px ui-sans-serif, system-ui, sans-serif";
+      ctx.font = "bold 26px ui-sans-serif, system-ui, sans-serif";
       ctx.fillStyle = judgmentColor(frame.lastJudgment.judgment);
-      ctx.fillText(frame.lastJudgment.judgment.toUpperCase(), W / 2, hitLineY - 40);
+      ctx.fillText(
+        frame.lastJudgment.judgment.toUpperCase(),
+        laneOriginX + totalLanesWidth / 2,
+        hitLineY - 28,
+      );
+      ctx.globalAlpha = 1.0;
     }
   }
+}
+
+function drawNoteRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  fill: string,
+): void {
+  // Soft glow underneath.
+  ctx.save();
+  ctx.shadowColor = fill;
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = fill;
+  ctx.fillRect(x, y, w, h);
+  ctx.restore();
+  // Crisp inner border for legibility.
+  ctx.strokeStyle = "rgba(255,255,255,0.7)";
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(x + 0.75, y + 0.75, w - 1.5, h - 1.5);
+}
+
+function formatScore(score: number): string {
+  // Group thousands with comma; keeps the HUD readable when combo scoring
+  // sends the number into the millions.
+  return score.toLocaleString("en-US");
 }
 
 function judgmentColor(j: string): string {

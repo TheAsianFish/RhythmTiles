@@ -47,10 +47,18 @@ export interface HealthPing {
 export async function pingHealthDetailed(): Promise<HealthPing> {
   const url = `${backendUrl()}/healthz`;
   try {
-    const resp = await fetch(url, { method: "GET", cache: "no-store" });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    let resp: Response;
+    try {
+      resp = await fetch(url, { method: "GET", cache: "no-store", signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
     if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}`, url };
     return { ok: true, url };
   } catch (e) {
-    return { ok: false, error: (e as Error).message, url };
+    const msg = (e as Error).message;
+    return { ok: false, error: msg.includes("abort") ? "Timed out (4s)" : msg, url };
   }
 }
