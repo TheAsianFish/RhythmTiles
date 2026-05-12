@@ -36,6 +36,52 @@ reload at `chrome://extensions` AND reload the YouTube tab.
 
 ## Milestones
 
+### 2026-05-11 (session 6)
+
+Gameplay correctness pass after first-real-play feedback, plus four
+research-driven follow-ups.
+
+- [x] **Hold gameplay rework**: NoteRuntime gained a `holding` flag.
+      Pressing the head no longer marks the hold as fully hit; the
+      renderer keeps drawing the body (head clamped to hit line,
+      brighter glow). Release within meh of tail completes successfully
+      and pays the bonus. Release too early or never -> miss + combo
+      reset. advanceCursor skips holding notes so they don't get
+      stranded as misses.
+- [x] **Stray-press penalty**: `handleStrayPress` runs whenever
+      registerPress returns null on a press. If no note exists within
+      250ms in that lane, the press counts as a miss (combo break +
+      miss tally). Mistimed-near-note presses are still not punished;
+      the note times out normally if not hit.
+- [x] **Beat-aware hold duration**: MAX_HOLD_BEATS=2.0, MIN_HOLD_BEATS=0.5.
+      At 172 BPM that's max 0.70s per hold (was 2.0s). Hold ends snap
+      to the nearest half-beat in the chart's beat grid so tails land
+      on musical positions. Snap stays inside the [min, max] window
+      instead of clamping outside and back in.
+- [x] **Hold rate cap + RMS sustain**: hold_detect promotes the top 5%
+      of taps by measured sustain duration. The previous one-pass
+      "every onset that sustains >150ms" produced ~50% holds on pop
+      music; the rate cap holds it at exactly 5% (39/780 on the test
+      song).
+- [x] **Mirror-pair lane palette**: lanes 0 and 3 share cool cyan,
+      lanes 1 and 2 share warm gold. osu!mania 4K convention; easier
+      hand-parsing on streams.
+- [x] **Per-section density curve**: chart_builder samples a 4-second
+      RMS curve and quantile-buckets each note into low / mid / high
+      energy. shape_difficulty scales its local min_gap by the bucket's
+      multiplier (0.75x / 1.0x / 1.30x) so chorus sections survive
+      thinning denser than verses.
+- [x] **Demucs scaffold**: app/pipeline/stems.py with optional Demucs
+      separation, gated by USE_DEMUCS=1 and demucs being importable.
+      When real, chart_builder uses the drum stem for onset detection.
+      Stays OFF by default; falls back to pass-through Stems on missing
+      dep or any error.
+- [x] **Placeholder chart UX**: backend never caches placeholders,
+      never returns cached placeholders, logs the cause loudly. Content
+      script detects pipelineVersion ending in `-placeholder` and
+      surfaces "Backend returned the 20-note demo chart" in the popup
+      instead of rendering it as a real chart.
+
 ### 2026-05-11 (session 5)
 
 Polish round informed by rhythm-game UX research (osu!mania, GH/RB, Beatstar,
@@ -182,8 +228,8 @@ Stage 5 polish + chord notes. Tightening up before Stage 6 ship work.
 
 ## Test counts
 
-- Backend: 32 pytest passing (added 3 hold-detect + 2 hand-balance tests).
-- Extension: 50 vitest passing.
+- Backend: 39 pytest passing.
+- Extension: 53 vitest passing.
 
 ## Stage status
 

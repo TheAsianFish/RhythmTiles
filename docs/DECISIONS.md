@@ -92,6 +92,118 @@ classifier.
 **Revisit when:** chord rate post-thinning ends up too low (<5%) or too
 high (>20%) on real songs. Tune CHORD_STRENGTH_QUANTILE.
 
+## 2026-05-11: Beat-aware hold duration with grid snap
+
+**Question:** What's a "reasonable" hold length?
+
+**Choice:** Bound by song tempo, not a fixed seconds value. Default
+MAX_HOLD_BEATS=2.0 (so at 172 BPM, max hold = ~0.7s; at 60 BPM, max =
+2.0s clamped by the absolute MAX_HOLD_S). Floor at MIN_HOLD_BEATS=0.5
+(or MIN_HOLD_S=0.20s, whichever wins). Hold ends snap to the nearest
+half-beat in the chart's beat grid so tails land on musical positions.
+
+**Why:** an early playtest had holds running 6+ beats long because we
+used a fixed 2.0s cap that didn't scale with tempo. A hold should feel
+like a held note (max half a bar in most pop styles); longer is just
+visual clutter. Snap-to-beat makes the release feel deliberate.
+
+**Revisit when:** charts include hands or genres where 4-beat held
+notes are normal (slow ballad sustains, ambient sections). Could
+expose a per-song "MAX_HOLD_BEATS" override in the chart metadata.
+
+## 2026-05-11: Stray-press penalty (combo break on key spam)
+
+**Question:** Should pressing keys away from any note do anything?
+
+**Choice:** Yes. When `registerPress` returns null AND no note exists
+within 250ms in the same lane, count it as a miss (combo break + miss
+tally). A press near a note but mistimed (within 250ms but outside hit
+windows) is not punished; the note will time out normally if not hit.
+
+**Why:** the user reported being able to spam keys without consequence.
+osu!mania ignores stray presses, but for a casual rhythm-game extension
+the lack of punishment lets players "smash to win" without engaging.
+The 250ms threshold separates clear spam (no note in sight) from a
+late hit attempt that just missed the meh window (which is 127ms at OD 8).
+
+**Revisit when:** a player complains about combo breaks from finger
+tremor on dense streams. Could reduce 250ms or expose as a setting.
+
+## 2026-05-11: Hold rate cap + RMS sustain detection
+
+**Question:** Which onsets become holds?
+
+**Choice:** Walk RMS forward from each tap; measure how long energy
+stays above 75% of the onset's peak. Sort all candidates by duration
+and promote only the top 5% (`MAX_HOLD_RATIO=0.05`). No baseline
+comparison.
+
+**Why:** an earlier baseline-vs-peak filter ("only promote when the
+onset clearly sticks out from surrounding RMS") produced 0 holds on
+continuous pop music because the entire song's RMS tracks the onset's
+peak. The rate cap alone gives the desired 5% density without that
+pathology, and on a 780-note song produces clean holds averaging
+1.5-2 beats long.
+
+**Revisit when:** stem separation lands. With clean drum / vocal
+stems, a sustain check on the vocal stem would actually mean
+something (vocals visibly hold; drums don't).
+
+## 2026-05-11: Per-section density curve (chorus vs verse)
+
+**Question:** Should chart density change across a song?
+
+**Choice:** Yes. chart_builder samples a 4-second RMS curve, classifies
+each note into low (bottom 33%) / mid / high (top 33%) energy
+buckets, and passes the bucket array to shape_difficulty. The thinner
+scales its local min_gap by the bucket multiplier
+(`_BUCKET_DENSITY_MULT = (0.75, 1.0, 1.30)`).
+
+**Why:** uniform density meant verses felt cluttered and choruses
+felt sparse relative to the music. The bucket approach is rule-based
+(no ML, no audio features beyond RMS) so it's deterministic and
+debuggable, but still tracks the song's actual dynamics.
+
+**Revisit when:** stem separation makes a per-stem energy curve
+available. Drum energy is a better "chorus" proxy than full-mix RMS,
+since vocal-driven choruses without big drums get missed today.
+
+## 2026-05-11: Mirror-pair lane palette (osu!mania 4K convention)
+
+**Question:** Should lanes have 4 unique colors or be visually paired?
+
+**Choice:** Mirror pair. Outer lanes (D, K) share cool cyan; inner
+lanes (F, J) share warm gold.
+
+**Why:** during fast streams, four-unique-color palettes force the
+player to read each lane's color independently, which is cognitive
+load that doesn't help play. The mirror palette groups outer vs
+inner so the visual chunk matches finger placement (outer thumbs
+vs inner fingers, in a manner of speaking). osu!mania 4K default
+skin uses this convention; Beatstar (3 lanes) and Fortnite Festival
+(5 lanes) use related inner/outer grouping.
+
+## 2026-05-11: Demucs stem separation (scaffold, off by default)
+
+**Question:** Do we run source separation as part of every chart?
+
+**Choice:** No by default. New `app/pipeline/stems.py` exposes
+`separate_stems(y, sr, use_demucs)` which returns drums/vocals/bass/
+other when `USE_DEMUCS=1` is set AND the `demucs` package is
+importable, otherwise returns a pass-through Stems where each "stem"
+is the original mix. When real, `chart_builder` uses the drum stem
+for onset detection.
+
+**Why:** the user explicitly asked about the system's understanding
+of vocal vs bass vs drum. Without stems the answer is "none, it's
+all spectral centroid on the mix." Demucs gives real separation
+(deep-learning model) but costs 1-4x realtime on CPU and downloads
+~300MB on first use, so it can't be default-on. The scaffold lets
+power users flip a flag without us redesigning the pipeline.
+
+**Revisit when:** a GPU deploy target lands (Modal, Replicate) and
+the latency budget allows running Demucs on every cold-start.
+
 ## 2026-05-11: Keyboard interception lives in the content script
 
 **Question:** How do we stop YouTube from acting on d/f/j/k key presses
