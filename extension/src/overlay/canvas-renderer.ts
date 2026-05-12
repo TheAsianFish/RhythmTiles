@@ -270,7 +270,9 @@ export class CanvasRenderer {
 
     ctx.font = "12px ui-sans-serif, system-ui, sans-serif";
     ctx.fillStyle = "#b8c3d3";
-    ctx.fillText(`Acc ${frame.accuracyPercent.toFixed(1)}%`, c.sideMarginPx, 84);
+    // Two decimals on accuracy so the player can see incremental MAX/GREAT
+    // tradeoffs at the top end of a clean run (99.87 reads differently than 99.9).
+    ctx.fillText(`Acc ${frame.accuracyPercent.toFixed(2)}%`, c.sideMarginPx, 84);
 
     // Combo display: grows in size briefly on milestone (every 50). Sits on
     // the right side of the HUD bar so it doesn't fight the score number.

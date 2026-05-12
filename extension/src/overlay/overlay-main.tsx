@@ -374,6 +374,11 @@ function App() {
       >
         <div className="grip"><span /><span /><span /></div>
         <div className="title">BeatBridge</div>
+        {chart && (
+          <div className="difficulty-chip" title={`Difficulty: ${difficulty}`}>
+            {difficulty.toUpperCase()}
+          </div>
+        )}
         <div className="spacer" />
         {results && <button onClick={restart}>Replay</button>}
         <button onClick={close}>Close</button>
@@ -397,10 +402,10 @@ function App() {
               <div className="new-best">New best!</div>
             )}
             <div className="row">Max combo {results.score.maxCombo}</div>
-            <div className="row">Accuracy {results.accuracy.toFixed(1)}%</div>
+            <div className="row">Accuracy {results.accuracy.toFixed(2)}%</div>
             {results.prevBest && (
               <div className="row" style={{ opacity: 0.6, marginTop: 4 }}>
-                Previous best: {results.prevBest.score.toLocaleString("en-US")} ({results.prevBest.accuracy.toFixed(1)}%)
+                Previous best: {results.prevBest.score.toLocaleString("en-US")} ({results.prevBest.accuracy.toFixed(2)}%)
               </div>
             )}
             <div className="row" style={{ marginTop: 8, opacity: 0.7 }}>

@@ -67,6 +67,20 @@ html, body {
   text-transform: uppercase;
 }
 
+/* Tiny pill that shows the active difficulty next to the BeatBridge title.
+   Intentionally small so it reads as metadata rather than competing with
+   gameplay; sits between the title and the spacer. */
+.header .difficulty-chip {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 215, 0, 0.18);
+  color: rgba(255, 220, 130, 0.95);
+  border: 1px solid rgba(255, 215, 0, 0.3);
+}
+
 .header .spacer { flex: 1; }
 
 .header button {
