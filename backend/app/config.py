@@ -24,6 +24,11 @@ class Settings:
     # the pipeline uses CPJKU Beat This! for beat + downbeat detection.
     # Falls back to librosa.beat.beat_track on any failure.
     use_beat_this: bool
+    # Phase 3 of docs/ML_PLAN.md. When True AND `transformers` is
+    # importable, the pipeline uses MERT embeddings to label sections
+    # (verse / chorus / breakdown) and drive per-section note density.
+    # Falls back to RMS-based bucketing on any failure.
+    use_mert: bool
     cors_origins: list[str]
     log_level: str
 
@@ -40,6 +45,7 @@ class Settings:
             allow_ytdlp=_bool(os.environ.get("BACKEND_ALLOW_YTDLP"), default=False),
             use_demucs=_bool(os.environ.get("USE_DEMUCS"), default=False),
             use_beat_this=_bool(os.environ.get("USE_BEAT_THIS"), default=False),
+            use_mert=_bool(os.environ.get("USE_MERT"), default=False),
             cors_origins=origins or ["*"],
             log_level=os.environ.get("LOG_LEVEL", "info"),
         )

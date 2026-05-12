@@ -20,9 +20,12 @@ from app.models import (
     ChartMeta,
     Note,
     PIPELINE_VERSION,
+    Section,
 )
 from app.config import settings
 from app.ml import onset_cache
+from app.ml import mert, section_cache
+from app.ml import sections as ml_sections
 from app.pipeline.beat_fill import add_subdivision_onsets, fill_empty_beats
 from app.pipeline.beat_track import detect_beats
 from app.pipeline.difficulty import shape_difficulty
@@ -111,6 +114,98 @@ def _energy_buckets_for_notes(
     return buckets
 
 
+def _energy_buckets_from_sections(
+    *,
+    notes,
+    sections: list[ml_sections.LabeledSection],
+) -> list[int]:
+    """Bucket each note by which MERT-derived section it sits in.
+
+    Compared to the RMS path: sections give sharp boundaries (chorus
+    starts THERE, not "gradually around there"), and MERT clustering
+    catches vocal-driven choruses that RMS alone misses on songs with
+    quiet drums under loud vocals.
+    """
+    if not notes:
+        return []
+    times = [float(n.t) for n in notes]
+    return ml_sections.buckets_for_note_times(
+        note_times_s=times, sections=sections,
+    )
+
+
+def _compute_mert_sections(
+    *,
+    y: np.ndarray,
+    sr: int,
+    content_hash: str,
+) -> list[ml_sections.LabeledSection]:
+    """Run MERT + section clustering, caching by audio hash.
+
+    Returns [] if MERT isn't available, the model fails, or the audio
+    is too short for clustering to be meaningful. Caller falls back to
+    RMS bucketing on empty.
+    """
+    cached = section_cache.get(content_hash=content_hash, source="mert")
+    if cached is not None:
+        logger.info("MERT section cache hit (%d sections)", len(cached))
+        return [
+            ml_sections.LabeledSection(
+                start_s=c.start_s,
+                end_s=c.end_s,
+                bucket=c.bucket,
+                cluster_id=c.cluster_id,
+                intensity=c.intensity,
+            )
+            for c in cached
+        ]
+    result = mert.embed(y=y, sr=sr)
+    if result is None:
+        return []
+    labeled = ml_sections.sections_from_embeddings(
+        embeddings=result.embeddings,
+        frame_rate_hz=result.frame_rate_hz,
+        y=y,
+        sr=sr,
+    )
+    if not labeled:
+        return []
+    section_cache.put(
+        content_hash=content_hash,
+        source="mert",
+        sections=[
+            section_cache.CachedSection(
+                start_s=s.start_s,
+                end_s=s.end_s,
+                bucket=s.bucket,
+                cluster_id=s.cluster_id,
+                intensity=s.intensity,
+            )
+            for s in labeled
+        ],
+    )
+    logger.info(
+        "MERT sections produced %d records spanning %.1fs",
+        len(labeled),
+        labeled[-1].end_s if labeled else 0.0,
+    )
+    return labeled
+
+
+def _section_label(cluster_id: int, bucket: int) -> str:
+    """Human-readable label for the Chart.sections wire format.
+
+    We don't actually know if a cluster is the verse or the chorus.
+    But the player UX wants something short. Bucket-derived labels
+    ("intense"/"steady"/"breakdown") are honest about what we know.
+    """
+    if bucket == 2:
+        return "intense"
+    if bucket == 0:
+        return "breakdown"
+    return "steady"
+
+
 def load_audio_to_mono(audio_bytes: bytes, target_sr: int = 22050) -> tuple[np.ndarray, int]:
     """Decode arbitrary audio bytes to a mono float32 numpy array at target_sr.
 
@@ -139,18 +234,20 @@ def build_chart_from_audio(
     video_id: str | None = None,
     use_beat_this: bool | None = None,
     use_demucs: bool | None = None,
+    use_mert: bool | None = None,
 ) -> Chart:
     """Run the full pipeline on the given audio. Returns Chart.
 
-    `use_beat_this` and `use_demucs` override the env-driven defaults for
-    this one call. Pass them when benchmarking, testing, or otherwise
-    needing to force the heuristic baseline (or force ML) without
-    touching environment variables. None = use settings.
+    `use_beat_this`, `use_demucs`, and `use_mert` override the env-driven
+    defaults for this one call. Pass them when benchmarking, testing, or
+    otherwise needing to force the heuristic baseline (or force ML)
+    without touching environment variables. None = use settings.
 
     Raises NotImplementedError only if librosa is unavailable. The pipeline
     itself is implemented in Stage 2; this entry point ties it together.
     """
     use_demucs_eff = settings.use_demucs if use_demucs is None else use_demucs
+    use_mert_eff = settings.use_mert if use_mert is None else use_mert
     try:
         y, sr = load_audio_to_mono(audio_bytes)
     except Exception as exc:  # pragma: no cover
@@ -272,7 +369,25 @@ def build_chart_from_audio(
         # accent gate it has always used.
         downbeats=beat_info.downbeats,
     )
-    energy_buckets = _energy_buckets_for_notes(notes=raw_notes, y=y, sr=sr)
+    # Energy bucket source: MERT-derived sections when the flag is on
+    # AND the model produces a usable result; RMS heuristic otherwise.
+    # The thinner's _ENERGY_MULT applies the same way to both - section
+    # buckets just give sharper boundaries between verse and chorus.
+    mert_sections: list[ml_sections.LabeledSection] = []
+    if use_mert_eff and mert.is_available():
+        mert_sections = _compute_mert_sections(
+            y=y, sr=sr, content_hash=content_hash,
+        )
+    if mert_sections:
+        energy_buckets = _energy_buckets_from_sections(
+            notes=raw_notes, sections=mert_sections,
+        )
+        logger.info(
+            "energy buckets sourced from MERT (%d sections)",
+            len(mert_sections),
+        )
+    else:
+        energy_buckets = _energy_buckets_for_notes(notes=raw_notes, y=y, sr=sr)
     thinned = shape_difficulty(
         notes=raw_notes,
         difficulty=difficulty,
@@ -292,6 +407,19 @@ def build_chart_from_audio(
     # AudioMeta.bpmCurve is the wire-format tempo curve. tuple-of-pairs in
     # Pydantic comes through fine, but BeatInfo carries it as a list[tuple]
     # which is exactly the expected shape. None passes through too.
+    wire_sections: list[Section] | None = None
+    if mert_sections:
+        intensities = [s.intensity for s in mert_sections]
+        max_i = max(intensities) or 1.0
+        wire_sections = [
+            Section(
+                start=round(s.start_s, 3),
+                end=round(s.end_s, 3),
+                intensity=round(min(1.0, s.intensity / max_i), 3),
+                label=_section_label(s.cluster_id, s.bucket),
+            )
+            for s in mert_sections
+        ]
     return Chart(
         audio=AudioMeta(
             source=audio_source if audio_source in {"youtube", "upload", "synthetic"} else "upload",
@@ -314,4 +442,5 @@ def build_chart_from_audio(
             Note(t=n.t, lane=n.lane, type=n.type, duration=n.duration)
             for n in notes
         ],
+        sections=wire_sections,
     )

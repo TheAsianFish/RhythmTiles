@@ -24,7 +24,7 @@ def warm_pipeline() -> float:
     import numpy as np
 
     from app.config import settings
-    from app.ml import beat_this
+    from app.ml import beat_this, mert
     from app.pipeline.beat_track import detect_beats
     from app.pipeline.onset_detect import detect_onsets
 
@@ -39,6 +39,8 @@ def warm_pipeline() -> float:
     t0 = time.perf_counter()
     if settings.use_beat_this:
         beat_this.warm()  # no-op when the package isn't importable
+    if settings.use_mert:
+        mert.warm()  # no-op when transformers isn't installed
     detect_beats(y=y, sr=sr)
     detect_onsets(y=y, sr=sr)
     elapsed = time.perf_counter() - t0

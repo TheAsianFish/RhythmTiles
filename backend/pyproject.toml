@@ -34,6 +34,10 @@ demucs = ["demucs>=4.0.1"]
 # licensed, weights tens of MB. Pulls torch as a transitive dep so the
 # install is heavy; only required for USE_BEAT_THIS=1.
 ml = ["beat-this>=0.1.0", "torch>=2.0"]
+# Phase 3 of docs/ML_PLAN.md: MERT audio embeddings for section
+# detection. CC-BY-NC weights (95M variant ~380MB); requires HuggingFace
+# transformers. Only required for USE_MERT=1.
+mert = ["transformers>=4.36", "huggingface-hub>=0.20"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]
