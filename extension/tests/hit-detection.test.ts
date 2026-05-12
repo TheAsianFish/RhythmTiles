@@ -30,7 +30,7 @@ describe("judge", () => {
 describe("scoreForJudgment", () => {
   it("matches design table", () => {
     expect(scoreForJudgment("perfect")).toBe(300);
-    expect(scoreForJudgment("good")).toBe(150);
+    expect(scoreForJudgment("good")).toBe(100);
     expect(scoreForJudgment("ok")).toBe(50);
     expect(scoreForJudgment("miss")).toBe(0);
   });

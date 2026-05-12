@@ -17,12 +17,15 @@ export function judge(deltaMs: number, windows: HitWindowsMs = DEFAULT_HIT_WINDO
   return "miss";
 }
 
+// Base point values awarded for each judgment, before combo multiplication.
+// The active score model multiplies these by the combo at the time of the hit
+// (osu!-style scoring). See scoring.applyHit.
 export function scoreForJudgment(j: Judgment): number {
   switch (j) {
     case "perfect":
       return 300;
     case "good":
-      return 150;
+      return 100;
     case "ok":
       return 50;
     case "miss":

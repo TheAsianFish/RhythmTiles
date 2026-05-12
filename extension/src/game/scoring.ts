@@ -1,6 +1,8 @@
 // Scoring + combo + accuracy.
 //
-// Multiplier: starts at 1x, +0.1x per 25 combo, capped at 4x.
+// Score model: each non-miss hit awards base points (300/100/50) multiplied by
+// the player's combo at the time of the hit. Combo increments on every
+// non-miss hit. A miss resets the combo to 0, which "resets" the multiplier.
 // Accuracy weights: Perfect=1.0, Good=0.66, OK=0.33, Miss=0.0.
 
 import type { HitResult, Judgment, ScoreState } from "./types";
@@ -23,15 +25,17 @@ const ACC_WEIGHT: Record<Judgment, number> = {
   miss: 0.0,
 };
 
+// Combo IS the multiplier in the new model. Exposed for tests and HUD code.
 export function multiplierFor(combo: number): number {
-  const tier = Math.floor(combo / 25);
-  return Math.min(1 + tier * 0.1, 4.0);
+  return Math.max(1, combo);
 }
 
 export function applyHit(state: ScoreState, hit: HitResult): ScoreState {
   const combo = hit.combo;
   const multiplier = multiplierFor(combo);
-  const score = state.score + Math.round(hit.scoreAwarded * state.multiplier);
+  // Award base points scaled by the combo at this hit. First hit (combo=1)
+  // pays base; combo=50 pays 50x base; combo=1000 pays 1000x base.
+  const score = state.score + Math.round(hit.scoreAwarded * multiplier);
   return {
     score,
     combo,
