@@ -47,11 +47,13 @@ export async function pingHealth(): Promise<boolean> {
 
 export interface BackendMlFlags {
   // Whether the env flag is set. The flag can be on while the package is
-  // missing or broken; beatThisActive tells us what the pipeline will
-  // actually do at request time.
+  // missing or broken; *Active tells us what the pipeline will actually
+  // do at request time. mertFlag/mertActive added in Phase 3.
   beatThisFlag: boolean;
   beatThisActive: boolean;
   demucsFlag: boolean;
+  mertFlag?: boolean;
+  mertActive?: boolean;
 }
 
 export interface HealthPing {

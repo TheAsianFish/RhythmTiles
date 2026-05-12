@@ -2,6 +2,54 @@
 
 Append-only log of decisions that shape the project. Each entry records the date, the question, the choice, and why.
 
+## 2026-05-12: ML Phase 3 - MERT section detection landed
+
+**Question:** RMS-based section bucketing (`_energy_buckets_for_notes`)
+misses vocal-driven choruses where the drums get quiet. Choruses on
+those songs end up bucket 1 (mid) instead of bucket 2 (high), so the
+thinner doesn't actually keep more notes in them. The chart feels
+uniform-density even though the song breathes.
+
+**Choice:** Wrap HuggingFace MERT-v1-95M behind a `USE_MERT=1` flag.
+Mean-pool the 13 transformer layers, coarsen to ~1 fps, KMeans K=4,
+smooth and merge into sections, label each section by RMS into 0/1/2
+buckets. Per-note bucket is now the bucket of the containing section.
+
+- Cache by content hash at `<CACHE_DIR>/sections/` so MERT runs once
+  per song regardless of difficulty count.
+- Populate `Chart.sections` on the wire JSON (previously unused) so
+  future HUD work can show "you're in the chorus" or color-code lanes
+  per section.
+- Pyproject `[mert]` extra: `transformers + huggingface-hub`. Torch is
+  inherited from the `[ml]` extra. Total install for ML-max is ~700MB
+  including all three models' weights.
+- Mode chip in the overlay menu now shows `♫◓✦` for ML-max,
+  `♫◓` for ML-full, `♫✦` for Beat This! + MERT (no Demucs), `✦` for
+  MERT-only. Trailing `✦` is the MERT signal.
+
+**Why:** RMS captures loudness, not structure. A pop chorus with a
+melodic vocal hook over quiet kit reads as "less energetic" to RMS but
+is musically the most important section. MERT's hidden states cluster
+by structural similarity (genre, mood, section), which is what we
+actually want for density modulation.
+
+**License:** MERT-v1-95M is CC-BY-NC. Acceptable for the demo /
+personal-use stance v1 takes. Flag for relicensing review (or
+Apache-licensed replacement model) before any commercial release.
+
+**Validation:** Section detection on a 4-minute synthetic test produces
+4-6 sections with bucket distribution 33/33/33 (the three intensity
+buckets). Tests cover cache round-trip, fallback when transformers
+missing, "audio too short" path, sweep-pointer lookup correctness.
+
+**Latency cost:** First call ~5s for model load + 0.5-2s for inference
+on a 4-minute song (CPU). Warm calls ~0.1s. Section cache hits are
+instant.
+
+**Revisit when:** A specific class of songs lands sections wrong
+(e.g. an EDM track classified as one section throughout). Tunables:
+DEFAULT_K_CLUSTERS, MIN_SECTION_S, the 33/67 quantile thresholds.
+
 ## 2026-05-12: Difficulty band re-tune for distinct tiers
 
 **Question:** Playtesting confirmed Hard and Expert felt

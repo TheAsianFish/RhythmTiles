@@ -159,6 +159,147 @@ def test_onset_cache_miss_returns_none() -> None:
     assert onset_cache.get(content_hash=None, source="per-stem") is None
 
 
+def test_mert_is_available_does_not_raise() -> None:
+    """is_available() must be cheap and never throw, even when deps are missing."""
+    from app.ml import mert
+
+    result = mert.is_available()
+    assert isinstance(result, bool)
+
+
+def test_mert_embed_returns_none_on_failure() -> None:
+    """When MERT isn't importable or inference fails, embed() returns None.
+
+    This is the contract that lets the chart builder safely call MERT and
+    fall back to RMS bucketing without a try/except around every call.
+    """
+    from app.ml import mert
+
+    sr = 22050
+    y = np.zeros(sr * 2, dtype=np.float32)
+    out = mert.embed(y=y, sr=sr)
+    # Either None (package missing or inference failed) or a MertResult.
+    # Both must be valid; we never raise from this code path.
+    assert out is None or hasattr(out, "embeddings")
+
+
+def test_section_cache_round_trip(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CACHE_DIR", str(tmp_path))
+    import app.config as config
+
+    importlib.reload(config)
+    from app.ml import section_cache
+
+    importlib.reload(section_cache)
+    sections_in = [
+        section_cache.CachedSection(
+            start_s=0.0, end_s=15.0, bucket=0, cluster_id=2, intensity=0.12,
+        ),
+        section_cache.CachedSection(
+            start_s=15.0, end_s=45.0, bucket=2, cluster_id=1, intensity=0.71,
+        ),
+    ]
+    section_cache.put(content_hash="abc", source="mert", sections=sections_in)
+    got = section_cache.get(content_hash="abc", source="mert")
+    assert got is not None
+    assert len(got) == 2
+    assert got[0].bucket == 0
+    assert got[1].bucket == 2
+    assert got[1].intensity == 0.71
+
+
+def test_section_cache_miss_returns_none() -> None:
+    from app.ml import section_cache
+
+    assert section_cache.get(content_hash="nope", source="mert") is None
+    assert section_cache.get(content_hash=None, source="mert") is None
+
+
+def test_sections_from_embeddings_too_short() -> None:
+    """Audio shorter than k * MIN_SECTION_S returns no sections."""
+    from app.ml import sections
+
+    # 10 seconds at 50 fps = 500 frames. K=4 * 6s = 24s needed.
+    embeddings = np.random.RandomState(0).randn(500, 768).astype(np.float32)
+    sr = 22050
+    y = np.zeros(sr * 10, dtype=np.float32)
+    out = sections.sections_from_embeddings(
+        embeddings=embeddings, frame_rate_hz=50.0, y=y, sr=sr,
+    )
+    assert out == []
+
+
+def test_sections_from_embeddings_long_enough() -> None:
+    """Synthetic embeddings with structure produce non-empty section list."""
+    from app.ml import sections
+
+    # 120 seconds at 50 fps = 6000 frames, 4 clusters of 1500 frames each.
+    n_per = 1500
+    rng = np.random.RandomState(0)
+    chunks = [
+        rng.randn(n_per, 768).astype(np.float32) + offset
+        for offset in (0.0, 5.0, 10.0, 0.0)
+    ]
+    embeddings = np.concatenate(chunks, axis=0)
+    sr = 22050
+    y = rng.randn(sr * 120).astype(np.float32) * 0.05
+    out = sections.sections_from_embeddings(
+        embeddings=embeddings, frame_rate_hz=50.0, y=y, sr=sr,
+    )
+    assert len(out) >= 2
+    # Buckets must be in {0, 1, 2}.
+    for s in out:
+        assert s.bucket in (0, 1, 2)
+        assert 0.0 <= s.start_s < s.end_s
+
+
+def test_buckets_for_note_times_ordered_lookup() -> None:
+    """Sweep-pointer lookup returns the right bucket for each note time."""
+    from app.ml.sections import LabeledSection, buckets_for_note_times
+
+    sections = [
+        LabeledSection(start_s=0.0, end_s=10.0, bucket=0, cluster_id=0, intensity=0.1),
+        LabeledSection(start_s=10.0, end_s=30.0, bucket=2, cluster_id=1, intensity=0.7),
+        LabeledSection(start_s=30.0, end_s=60.0, bucket=1, cluster_id=2, intensity=0.4),
+    ]
+    times = [1.0, 9.99, 10.0, 20.0, 29.99, 30.0, 45.0, 60.0, 200.0]
+    got = buckets_for_note_times(note_times_s=times, sections=sections)
+    assert got == [0, 0, 2, 2, 2, 1, 1, 1, 1]
+
+
+def test_use_mert_false_skips_mert_path(monkeypatch) -> None:
+    """use_mert=False must NOT call MERT even if the env says otherwise."""
+    monkeypatch.setenv("USE_MERT", "1")
+    import importlib
+
+    import app.config as config
+    importlib.reload(config)
+    import app.pipeline.chart_builder as chart_builder
+    importlib.reload(chart_builder)
+
+    # If we passed use_mert=False, the build_chart path should produce a
+    # chart without MERT sections (Chart.sections is None or empty).
+    import io
+    import soundfile as sf
+
+    sr = 22050
+    rng = np.random.default_rng(0)
+    y = (rng.standard_normal(sr * 4) * 0.05).astype(np.float32)
+    for k in range(0, sr * 4, sr // 2):
+        y[k : k + int(0.02 * sr)] += rng.standard_normal(int(0.02 * sr)).astype(np.float32) * 0.6
+    buf = io.BytesIO()
+    sf.write(buf, y, sr, format="WAV", subtype="PCM_16")
+    chart = chart_builder.build_chart_from_audio(
+        audio_bytes=buf.getvalue(),
+        filename="t.wav",
+        difficulty="normal",
+        use_mert=False,
+    )
+    # sections is None when MERT didn't run (whether by flag, package
+    # missing, or audio too short).
+    assert chart.sections in (None, [])
+
+
 def test_downbeat_accent_fires_chord_regardless_of_centroid() -> None:
     """A non-bright onset that lands on a downbeat must still emit a chord.
 

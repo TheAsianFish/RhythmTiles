@@ -7,11 +7,10 @@ heuristic baseline.
 
 ## Status
 
-Phase 1 (Beat This!) and Phase 2 (Demucs + per-stem onsets) are both
-ACTIVE behind their respective env flags. The heuristic pipeline
-remains the production default; ML is opt-in per request via
-`USE_BEAT_THIS=1` and `USE_DEMUCS=1`. Both flags fall back to librosa
-+ full-mix on package or runtime failure.
+Phases 1, 2, and 3 are all ACTIVE behind their env flags. The
+heuristic pipeline remains the production default; ML is opt-in per
+request via `USE_BEAT_THIS=1`, `USE_DEMUCS=1`, and `USE_MERT=1`. All
+three flags fall back to their baseline on package or runtime failure.
 
   - `app/ml/beat_this.py` wraps the Beat This! detector behind the
     same BeatInfo interface as librosa, plus a downbeat list and a
@@ -37,11 +36,27 @@ remains the production default; ML is opt-in per request via
   - `app/pipeline/lane_assign.py` routes by stem when available
     (drums -> low band, vocals -> high band) and emits chord stacks
     on real downbeats regardless of strength/centroid.
+  - `app/ml/mert.py` wraps the HuggingFace MERT-v1-95M model with
+    module-level caching, thread lock, and graceful fallback.
+    Resamples mono 22050Hz audio to MERT's native 24kHz, mean-pools
+    the 13 transformer hidden states into a single per-frame
+    embedding.
+  - `app/ml/sections.py` clusters MERT embeddings into intensity-
+    labeled sections (no ML deps; pure numpy + scikit-learn).
+    Coarsens to ~1 fps, KMeans K=4, smooths, merges short runs,
+    labels each section by mean RMS into 3 intensity buckets.
+  - `app/ml/section_cache.py` persists section labels by audio hash
+    so MERT runs once per song no matter how many difficulties.
+  - `app/pipeline/chart_builder.py` uses MERT section buckets to drive
+    `_energy_buckets_for_notes` when active, and populates the
+    previously-empty `Chart.sections` field on the wire JSON.
   - `app/tools/bench_ml_phase.py` runs the ML_PLAN validation gates
-    against any WAV with `--baseline-only`, `--beat-this`, or
-    `--demucs` flags.
+    against any WAV with `--baseline-only`, `--beat-this`,
+    `--demucs`, or `--mert` flags.
 
-Phase 3 (MERT for section detection) is still architectural-only.
+All ML phases (1, 2, 3) are now flag-gated and shipping. Phase 4
+(polyphonic transcription) remains DEFERRED. Phase 5 (learned lane
+assignment) remains DEFERRED.
 
 ## Honest reframe from research
 

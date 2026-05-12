@@ -82,6 +82,7 @@ def _run_once(
     difficulty: str = "normal",
     use_beat_this: bool = False,
     use_demucs: bool = False,
+    use_mert: bool = False,
 ) -> Result:
     t0 = time.perf_counter()
     chart = build_chart_from_audio(
@@ -90,6 +91,7 @@ def _run_once(
         difficulty=difficulty,
         use_beat_this=use_beat_this,
         use_demucs=use_demucs,
+        use_mert=use_mert,
     )
     cold_total = time.perf_counter() - t0
 
@@ -100,6 +102,7 @@ def _run_once(
         difficulty=difficulty,
         use_beat_this=use_beat_this,
         use_demucs=use_demucs,
+        use_mert=use_mert,
     )
     warm_total = time.perf_counter() - t1
 
@@ -172,6 +175,8 @@ def main() -> None:
                    help="Turn USE_BEAT_THIS on for the ML run.")
     p.add_argument("--demucs", action="store_true",
                    help="Turn USE_DEMUCS on for the ML run.")
+    p.add_argument("--mert", action="store_true",
+                   help="Turn USE_MERT on for the ML run (section detection).")
     args = p.parse_args()
 
     audio_bytes = _load_audio(args)
@@ -180,7 +185,7 @@ def main() -> None:
     baseline = _run_once(
         "heuristic baseline", audio_bytes,
         difficulty=args.difficulty,
-        use_beat_this=False, use_demucs=False,
+        use_beat_this=False, use_demucs=False, use_mert=False,
     )
     _print_result(baseline)
 
@@ -188,17 +193,18 @@ def main() -> None:
         _print_targets(baseline)
         return
 
-    if not (args.beat_this or args.demucs):
-        print("\n(no --beat-this / --demucs flag set; skipping ML comparison)")
+    if not (args.beat_this or args.demucs or args.mert):
+        print("\n(no --beat-this / --demucs / --mert flag set; skipping ML comparison)")
         _print_targets(baseline)
         return
 
     ml_run = _run_once(
-        f"ML run (beat_this={args.beat_this} demucs={args.demucs})",
+        f"ML run (beat_this={args.beat_this} demucs={args.demucs} mert={args.mert})",
         audio_bytes,
         difficulty=args.difficulty,
         use_beat_this=args.beat_this,
         use_demucs=args.demucs,
+        use_mert=args.mert,
     )
     _print_result(ml_run)
     _print_targets(ml_run)

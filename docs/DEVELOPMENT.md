@@ -37,14 +37,19 @@ Env vars (see `backend/.env.example`):
   weights; per-song generation goes from ~10s to several minutes on CPU.
 - `USE_BEAT_THIS` (1 to enable CPJKU Beat This! beat + downbeat detector;
   off by default. `pip install '.[ml]'` to install the optional deps).
+- `USE_MERT` (1 to enable MERT audio embeddings for section detection;
+  off by default. Drives per-section density and populates
+  `Chart.sections`. `pip install '.[mert]'` to install.)
 - `CACHE_DIR` (where SQLite + temp audio live; defaults to `backend/cache`).
   Beat-tracker output is cached under `<CACHE_DIR>/beats/`. Per-stem onset
-  lists are cached under `<CACHE_DIR>/onsets/` so re-generating the same
-  song at a different difficulty doesn't re-run Demucs.
+  lists are cached under `<CACHE_DIR>/onsets/`. MERT section labels under
+  `<CACHE_DIR>/sections/`. All three caches share the audio's content-hash
+  key so re-generating the same song at a different difficulty doesn't
+  re-pay any ML cost.
 
-## Three modes
+## Four modes
 
-The pipeline supports three modes, toggled entirely by env vars. The
+The pipeline supports four modes, toggled entirely by env vars. The
 default (everything off) is the librosa heuristic that shipped before
 any ML landed. All flag combinations gracefully fall back if their
 package isn't installed, so a misconfig never breaks chart generation.
@@ -54,11 +59,13 @@ package isn't installed, so a misconfig never breaks chart generation.
 | Baseline | (all off) | `pip install -e ".[dev]"` | ~10s |
 | ML-light | `USE_BEAT_THIS=1` | `pip install -e ".[ml]"` | ~15-20s |
 | ML-full | `USE_BEAT_THIS=1` + `USE_DEMUCS=1` | `pip install -e ".[ml,demucs]"` | 2-5 min |
+| ML-max | + `USE_MERT=1` | `pip install -e ".[ml,demucs,mert]"` | 3-7 min (first song only) |
 
 After the first chart per song, the chart cache returns it instantly
-on replay. Per-stem onsets and Beat This! beats are cached separately
-by audio content hash, so re-generating at a different difficulty
-doesn't re-pay the ML cost.
+on replay. Per-stem onsets, Beat This! beats, AND MERT section labels
+are cached separately by audio content hash, so re-generating at a
+different difficulty doesn't re-pay the ML cost. MERT runs once per
+song; the section labels apply to every difficulty.
 
 ## Extension
 

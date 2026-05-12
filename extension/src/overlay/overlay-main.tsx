@@ -126,7 +126,15 @@ function modeChipFor(
   const beat = ml.beatThisActive;
   const beatFlagOnly = ml.beatThisFlag && !ml.beatThisActive;
   const demucs = ml.demucsFlag;
-  if (!beat && !beatFlagOnly && !demucs) {
+  const mertActive = !!ml.mertActive;
+  const mertFlagOnly = !!ml.mertFlag && !mertActive;
+  // Trailing "+✦" when MERT is active. The base chip already conveys
+  // beat / stem state; the trailing sigil signals section-aware density.
+  const mertSuffix = mertActive ? "✦" : "";
+  const mertTitle = mertActive
+    ? " MERT section detection drives per-section density (verses sparse, choruses dense)."
+    : "";
+  if (!beat && !beatFlagOnly && !demucs && !mertActive && !mertFlagOnly) {
     return {
       symbol: "≋",
       label: "Baseline",
@@ -135,24 +143,37 @@ function modeChipFor(
   }
   if (beat && demucs) {
     return {
-      symbol: "♫◓",
-      label: "ML-full",
+      symbol: `♫◓${mertSuffix}`,
+      label: mertActive ? "ML-max" : "ML-full",
       title:
-        "Beat This! beats + downbeats + Demucs per-stem onsets. Drum line on left hand, vocal melody on right.",
+        "Beat This! beats + downbeats + Demucs per-stem onsets. Drum line on left hand, vocal melody on right." +
+        mertTitle,
     };
   }
   if (beat) {
     return {
-      symbol: "♫",
-      label: "ML-light",
-      title: "Beat This! beats and downbeats; full-mix onsets with centroid routing.",
+      symbol: `♫${mertSuffix}`,
+      label: mertActive ? "ML-light + sections" : "ML-light",
+      title:
+        "Beat This! beats and downbeats; full-mix onsets with centroid routing." +
+        mertTitle,
     };
   }
   if (demucs && !beat) {
     return {
-      symbol: "◓",
+      symbol: `◓${mertSuffix}`,
       label: "Demucs only",
-      title: "Demucs per-stem onsets active; librosa beat tracker (no downbeats).",
+      title:
+        "Demucs per-stem onsets active; librosa beat tracker (no downbeats)." +
+        mertTitle,
+    };
+  }
+  if (mertActive) {
+    return {
+      symbol: "✦",
+      label: "MERT only",
+      title:
+        "MERT section detection drives density; baseline beats + onsets otherwise.",
     };
   }
   // Flag on but inference path not available (package missing, device error).
@@ -160,7 +181,8 @@ function modeChipFor(
     symbol: "⚠",
     label: "ML flag, inactive",
     title:
-      "USE_BEAT_THIS is set but beat_this is not importable. Pipeline silently uses librosa.",
+      "An ML flag is set but the corresponding package is not importable. " +
+      "Pipeline silently uses the baseline.",
   };
 }
 
