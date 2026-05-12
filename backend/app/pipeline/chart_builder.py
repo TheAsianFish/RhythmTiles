@@ -41,17 +41,17 @@ _ENERGY_WINDOW_S = 4.0
 # hold ratio = more challenge. Expert is meant to feel busy and technical,
 # not random; the lane assigner's hand-balance and chord rules still apply.
 _DIFFICULTY_TUNING = {
-    # chord_quantile = "onsets above this strength quantile may become chord
-    # stacks." Real polyphonic chords are surfaced separately by the
-    # centroid-aware onset merge (different-pitch near-simultaneous events
-    # stay as two near-simultaneous single notes 20-30ms apart). The
-    # strength-based path here is reserved for genuinely massive accent
-    # moments (downbeats, cymbal crashes, etc.) where doubling a note
-    # feels right. Numbers raised so chords are RARE - was 0.95-0.72,
-    # which mapped many single piano keys as fake chords.
-    "easy":   {"chord_quantile": 0.98, "hold_ratio": 0.02},
-    "normal": {"chord_quantile": 0.96, "hold_ratio": 0.05},
-    "hard":   {"chord_quantile": 0.93, "hold_ratio": 0.08},
+    # chord_quantile = strength quantile above which an onset is a CHORD
+    # CANDIDATE. The lane assigner ALSO gates on centroid (must clear
+    # CHORD_ACCENT_MIN_CENTROID_HZ) so a loud kick doesn't double-fire.
+    # Both gates aim chord stacks at musical accents (cymbal crashes,
+    # bright snares, downbeat accents). Target rate: 3-6% of notes in
+    # chord groups, tuned together with the centroid threshold. Was
+    # 0.98-0.90 (too few chords); these widen the strength gate so the
+    # centroid gate becomes the dominant filter.
+    "easy":   {"chord_quantile": 0.97, "hold_ratio": 0.02},
+    "normal": {"chord_quantile": 0.95, "hold_ratio": 0.05},
+    "hard":   {"chord_quantile": 0.92, "hold_ratio": 0.08},
     "expert": {"chord_quantile": 0.90, "hold_ratio": 0.12},
 }
 

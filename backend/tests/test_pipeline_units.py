@@ -168,22 +168,41 @@ def test_shape_difficulty_preserves_chord_partners() -> None:
     assert len(same_t) == 2, f"chord partner was dropped (shaped times around chord: {times[:5]})"
 
 
-def test_assign_lanes_single_note_for_loud_single_onset() -> None:
-    # Strong single onset should produce ONE note, not a chord stack. The
-    # strength-based chord emission was wrong musically (a loud kick is one
-    # note, not a chord) so we removed it. Real chords now come only from
-    # the centroid-aware onset merge keeping distinct-pitch near-
-    # simultaneous events.
+def test_assign_lanes_no_chord_for_strong_lowfreq_onset() -> None:
+    # A loud LOW-frequency onset (centroid 2000Hz, kick/bass territory)
+    # should NOT become a chord even if it's in the top strength quantile.
+    # Chord emission is gated on BOTH strength AND high centroid (accent).
     onsets: list[Onset] = []
     for i in range(40):
         onsets.append(
-            Onset(t=0.25 * i, strength=0.2, centroid_hz=200.0 if i % 2 == 0 else 4000.0),
+            Onset(t=0.25 * i, strength=0.2, centroid_hz=400.0),
         )
-    onsets[20] = Onset(t=0.25 * 20, strength=1.0, centroid_hz=2000.0)
+    onsets[20] = Onset(t=0.25 * 20, strength=1.0, centroid_hz=2000.0)  # below 3000
     notes = assign_lanes(onsets=onsets, y=None, sr=22050)  # type: ignore[arg-type]
-    # The strongest onset at t=5.0 must become a SINGLE note now.
     at_strong_t = [n for n in notes if abs(n.t - 5.0) < 1e-6]
-    assert len(at_strong_t) == 1, f"strong onset should be single note: {at_strong_t}"
+    assert len(at_strong_t) == 1, (
+        f"loud LOW-centroid onset should stay single: {at_strong_t}"
+    )
+
+
+def test_assign_lanes_emits_chord_for_accent_onset() -> None:
+    # A loud HIGH-frequency onset (centroid 4500Hz, cymbal/crash territory)
+    # in the top strength quantile SHOULD emit a chord stack.
+    onsets: list[Onset] = []
+    for i in range(40):
+        onsets.append(
+            Onset(t=0.25 * i, strength=0.2, centroid_hz=200.0 if i % 2 == 0 else 4500.0),
+        )
+    # Index 20 is a strong cymbal-like accent.
+    onsets[20] = Onset(t=0.25 * 20, strength=1.0, centroid_hz=5000.0)
+    notes = assign_lanes(onsets=onsets, y=None, sr=22050)  # type: ignore[arg-type]
+    at_accent = [n for n in notes if abs(n.t - 5.0) < 1e-6]
+    assert len(at_accent) == 2, (
+        f"high-centroid strong accent should emit chord: {at_accent}"
+    )
+    # One note in each band.
+    lanes = sorted(n.lane for n in at_accent)
+    assert lanes[0] in (0, 1) and lanes[1] in (2, 3)
 
 
 def test_hold_detect_returns_taps_when_audio_is_short_silence() -> None:
