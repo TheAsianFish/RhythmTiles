@@ -2,6 +2,30 @@
 
 Append-only log of decisions that shape the project. Each entry records the date, the question, the choice, and why.
 
+## 2026-05-11: YouTube seek and pause behavior in the overlay loop
+
+**Question:** What happens when the user pauses the video or scrubs the timeline?
+
+**Choice:**
+- **Pause / play:** `BB_VIDEO_PAUSED` and `BB_VIDEO_PLAYING` from the content
+  script update the bridged clock and call `GameLoop.pause()` / `resume()`.
+  Pause cancels the rAF tick; play restarts it. No countdown yet (that is a
+  separate Stage 5 polish item).
+- **Seek:** `BB_VIDEO_SEEKED` updates clock time and calls
+  `GameLoop.seekToVideoTime(t)`, which converts to game ms with the stored
+  calibration offset. All `NoteRuntime` hit/miss flags clear; score state
+  resets to empty. Notes with start time before the new position (minus the
+  meh window) are marked `missed` only so the renderer hides them; they do
+  not add miss penalties. The chart JSON is never refetched.
+
+**Why:** The previous behavior advanced the miss cursor on large time jumps,
+which spammed misses and broke rewind. Resetting local state keeps one chart
+load authoritative and matches user expectations for "scrub = start this
+section fresh."
+
+**Revisit when:** we want "resume score from before seek" or tallies per
+segment, which would need a different scoring model.
+
 ## 2026-05-11: Six-tier judgment system with OD-based windows
 
 **Question:** What hit-window scheme do we use?
@@ -40,24 +64,105 @@ count, which is the whole point of a rhythm game.
 **Revisit when:** if it makes scoring hard to read at extreme combos, we can
 display in K/M units, but the math stays the same.
 
-## 2026-05-11: Chord notes (planned, not yet built)
+## 2026-05-11: Chord notes (implemented)
 
 **Question:** Should two-note chords (simultaneous keys) be supported?
 
-**Choice:** Plan it now, build it later. The data model already supports it
-(multiple `Note` entries can share the same `t` value with different lanes).
-The game loop, input capture, and hit detection all scope by lane, so two
-same-`t` notes "just work" as a chord without changes.
+**Choice:** Yes. Lane assigner now emits chord pairs when an onset is in the
+top quantile of normalized strength AND both bands have lane capacity at
+that moment.
 
-What's missing:
-1. The lane assigner picks one lane per onset today; for chord support it
-   would split "strong" onsets (top-quantile onset_strength) into two notes
-   across the band split (e.g. one low-band lane + one high-band lane).
-2. The canvas renderer doesn't visually link chord notes; could add a faint
-   horizontal connector so the player sees the chord at a glance.
+**Mechanics:**
+- `CHORD_STRENGTH_QUANTILE = 0.88` (top 12% of onsets eligible).
+- `MIN_ONSETS_FOR_CHORDS = 24`; below that the threshold becomes +inf so
+  no chords are emitted (strength distribution too noisy on tiny clips).
+- A chord is one low-band lane (0 or 1) plus one high-band lane (2 or 3),
+  picked by the existing per-band toggle. If either band has no capacity
+  inside `HIT_WINDOW_S`, the onset falls back to a single note.
+- The difficulty shaper has a chord-aware branch: same-`t` notes with
+  distinct lanes are always kept regardless of `min_gap`, so the thinner
+  never tears a chord apart.
 
-Tracked in `extension/src/game/types.ts` NoteRuntime docstring and
-`docs/PIPELINE.md` "Future: chord notes".
+**Why:** the data model + game loop already supported it (multiple notes
+can share `t` with distinct lanes; hit detection scopes by lane). The
+missing piece was the assigner. Top-quantile strength is a reasonable
+proxy for "the player would intuit a chord here" without a stem-based
+classifier.
+
+**Revisit when:** chord rate post-thinning ends up too low (<5%) or too
+high (>20%) on real songs. Tune CHORD_STRENGTH_QUANTILE.
+
+## 2026-05-11: Keyboard interception lives in the content script
+
+**Question:** How do we stop YouTube from acting on d/f/j/k key presses
+when the game is running?
+
+**Choice:** Content script installs a document-level keydown/keyup at
+capture phase. For lane-bound keys it calls
+`stopImmediatePropagation()` + `preventDefault()` and forwards the event
+to the overlay iframe via `postMessage`. The overlay's `InputCapture`
+exposes an `injectKey` method that funnels external events through the
+same pipeline as DOM events.
+
+**Why:**
+- YouTube installs its own keydown listeners. `k` toggles pause, `j` and
+  `l` seek by 10s, `f` toggles fullscreen, etc. Without interception,
+  every game key would also trigger YouTube actions.
+- `stopImmediatePropagation` at capture phase fires before bubble-phase
+  listeners (which is where most JS handlers live) and also blocks other
+  capture-phase listeners on the same target. `preventDefault` covers
+  browser-default behaviors.
+- We skip interception when `event.target` is an editable element
+  (input/textarea/contenteditable) so users can type into YouTube's
+  search bar normally while the game is running.
+
+**Revisit when:** YouTube adds a listener attached at `document` capture
+phase that fires before us, or if MV3 service workers gain a way to
+intercept page-level keys directly (unlikely).
+
+## 2026-05-11: HUD sized as a floating widget
+
+**Question:** How tall and wide should the overlay panel be?
+
+**Choice:** 320px wide, 620px max height (was 360px wide and full viewport
+height minus margins).
+
+**Why:**
+- A rhythm game needs vertical room for note travel, but full-screen
+  feels like a takeover. Other Chrome extensions (PiP, SponsorBlock,
+  Plasmo widgets) sit as compact floating panels and don't dominate.
+- 620px at the default `pixelsPerMs=0.55` still gives ~800ms of note
+  lead time, which is plenty for any music. Users who want more can
+  drag-resize later (out of scope for v1).
+
+## 2026-05-11: Hit-sound is synthesized, not bundled
+
+**Question:** Where does the click sound come from?
+
+**Choice:** Synthesize a short noise burst on demand via the Web Audio
+API (`overlay/sfx.ts`).
+
+**Why:**
+- Bundling an asset means a fetch (or base64 inflation in the JS bundle)
+  and another permission to declare. Synthesis is ~30 lines of code,
+  zero bytes of asset, and identical playback latency.
+- Triggered only on non-miss `registerPress` results so key spam without
+  a corresponding note stays silent (user requirement).
+- 10% gain, 35ms duration, 8ms rate cap to prevent clipping when chord
+  double-hits or buffered presses fire in quick succession.
+
+## 2026-05-11: Settings live in the popup, not a separate page
+
+**Question:** Where do users configure keybindings, note speed, opacity?
+
+**Choice:** Inline in the popup, hidden behind an "Advanced settings"
+disclosure. Calibration stays a separate full-tab page because it needs
+keyboard focus and audio playback.
+
+**Why:** popup is the one place users go before every play session. Adding
+a second settings page splits attention and adds another click. The
+disclosure keeps the default popup view clean for casual users while
+power users can rebind keys and dial speed without navigating away.
 
 ## 2026-05-11: yt-dlp + bundled ffmpeg for real chart generation
 

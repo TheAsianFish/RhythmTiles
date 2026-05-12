@@ -21,17 +21,71 @@ reload at `chrome://extensions` AND reload the YouTube tab.
 
 ## Open TODOs (rolling)
 
-- [ ] Chord notes: lane assigner splits high-strength onsets into 2 notes.
-      Data model + game loop already support it (see DECISIONS.md entry).
 - [ ] Tab capture path (Option A): currently the backend uses yt-dlp behind a
       flag. For production we want extension-side tab capture so we never
       have to redownload audio.
 - [ ] Manual playtest the calibration flow on bluetooth vs wired headphones.
-- [ ] Settings panel for keybindings + note speed; right now only OD is
-      surfaced in the popup.
 - [ ] Telemetry shape for Stage 6 (Plausible or Umami; anonymous only).
+- [ ] Mirror-pair lane colors (osu!mania 4K convention): outer lanes one
+      color, inner lanes another, so D/K match and F/J match. Helps hand
+      parsing during streams. (Research note from session 5.)
+- [ ] Per-section density curve (chorus denser than verse): detect with
+      spectral-flux envelope before lane assignment.
+- [ ] Demucs source separation behind USE_DEMUCS=1 flag for stem-based
+      lane assignment. Biggest expected jump in chart quality.
 
 ## Milestones
+
+### 2026-05-11 (session 5)
+
+Polish round informed by rhythm-game UX research (osu!mania, GH/RB, Beatstar,
+Piano Tiles, Fortnite Festival).
+
+- [x] **Hold detection**: new `app/pipeline/hold_detect.py` uses RMS energy
+      sustain (SUSTAIN_THRESHOLD=0.55 of onset peak, MIN_HOLD_S=0.15,
+      MAX_HOLD_S=2.0). Respects same-lane next note with safety margin.
+      Three new tests for silent audio, sustained sine, and same-lane horizon.
+- [x] **Hand-balance stream rule**: lane_assign now tracks consecutive
+      same-hand notes (lanes 0-1=left, 2-3=right). After 2 same-hand notes
+      in a stream (gap < beat_period/2), the next note prefers the opposite
+      band. Charts no longer feel like one hand is overworked. Beat period
+      threaded through from chart_builder via beat_info.bpm.
+- [x] **Renderer polish (lane press flash, miss vignette, combo milestone)**:
+      lane-color gradient flash on press (180ms decay), hit-line pulse on
+      successful hits, red radial vignette on miss streaks of 3+, gold
+      "X COMBO" splash at every 50-combo milestone. Rounded note rects with
+      vertical gradient; hold notes get bright head/tail caps.
+- [x] **Hit-delta meter**: horizontal calibration bar above the hit line
+      showing the last 12 hit timings as colored ticks (color matches
+      judgment tier, opacity fades with age). Lets the player see if they're
+      drifting early or late mid-song.
+- [x] **3-2-1 countdown on resume**: when the user pauses then unpauses a
+      YouTube video, overlay pauses the video again, runs a 3-2-1-GO
+      countdown over the receptor area (~58% down, GH/RB convention), then
+      plays. Loop ignores keypresses during pause/countdown (still tracks
+      pressedLanes for visual continuity). First play of a chart skips the
+      countdown.
+- [x] **Input gated by pause state**: handleInput no-ops scoring when
+      `isPaused` is true so countdown keypresses don't accidentally land on
+      notes near the pause point.
+
+### 2026-05-11 (session 4)
+
+Extension robustness around slow chart delivery and YouTube transport controls.
+
+- [x] **Chart-received timeout vs late chart**: overlay starts a 15s error
+      timer; if generation exceeds 15s the banner could appear even after
+      `BB_LOAD_CHART` succeeds. Fix: cancel timeout and clear `errorMsg` on
+      chart arrival (`chartTimeoutRef` in `overlay-main.tsx`).
+- [x] **Video pause/play maps to game loop**: `BB_VIDEO_PAUSED` /
+      `BB_VIDEO_PLAYING` call `GameLoop.pause()` / `resume()`, which stop
+      and restart `requestAnimationFrame` instead of spinning while time is
+      frozen.
+- [x] **Video seek resets playable state**: `BB_VIDEO_SEEKED` calls
+      `seekToVideoTime(videoTime)`. Chart notes are not recomputed. All
+      note hit/miss flags reset; score and combo reset to zero; onsets before
+      the seek point are marked missed only for rendering (no scoring penalty).
+      Lets rewind/replay a section without corrupted cursor state.
 
 ### 2026-05-11 (session 1)
 
@@ -80,15 +134,56 @@ notes are actually synced to audio.
 - [x] Backend test isolation fix: conftest now reloads cache + routes after
       monkeypatching CACHE_DIR.
 
+### 2026-05-11 (session 3)
+
+Stage 5 polish + chord notes. Tightening up before Stage 6 ship work.
+
+- [x] **Settings panel in popup**: keybindings (per-lane KeyCapture button,
+      duplicate-detection warning), note speed slider (0.5x-2.0x), panel
+      opacity slider (40%-100%), hit-sound toggle, reset-to-defaults. All
+      persist to chrome.storage.local immediately.
+- [x] **Panel opacity wired**: overlay.css uses a `--panel-alpha` CSS variable
+      multiplied against each gradient stop; overlay-main sets it from
+      UserSettings.opacity on game start.
+- [x] **Note speed wired**: overlay-main multiplies DEFAULT_RENDER_CONFIG
+      .pixelsPerMs by settings.noteSpeed via renderer.setConfig.
+- [x] **Results card shows previous best**: loadBestScore runs alongside
+      chart load; if the just-played score beats it, the card shows a gold
+      "New best!" line.
+- [x] **Chord notes** (backend): lane_assign emits two simultaneous notes
+      (low-band + high-band) when an onset is in the top 12% strength
+      quantile AND both bands have lane capacity. CHORD_STRENGTH_QUANTILE=0.88,
+      MIN_ONSETS_FOR_CHORDS=24 (below that, threshold is +inf so no chords).
+- [x] **Difficulty shaper preserves chord pairs**: same-`t` notes with
+      distinct lanes are always kept regardless of min_gap.
+- [x] **Video listener leak fix**: content-script now tracks the pause/play
+      /seeked listeners it attaches to `<video>` and detaches them on
+      overlay close or on the next Start Game.
+- [x] **Keyboard isolation from YouTube**: content-script installs a
+      document-level keydown/keyup at capture phase. For lane-bound codes
+      it calls stopImmediatePropagation + preventDefault and forwards the
+      event to the overlay iframe via postMessage. The iframe's InputCapture
+      gained an `injectKey` path so forwarded events route through the same
+      hit-detection pipeline as direct-focus events. Editable element guard
+      (input/textarea/contenteditable) so typing in YouTube search still
+      works.
+- [x] **HUD overlay sized like a widget**: panel is now 320px wide and
+      capped at 620px tall (was full viewport height). Lead time at default
+      noteSpeed is still ~800ms, plenty for any song.
+- [x] **Hit-sound on note hits**: synthesized noise click via Web Audio API
+      (`extension/src/overlay/sfx.ts`). Fires only on non-miss registerPress
+      results (key spam stays silent). Gated by `sfxEnabled`, now defaulted
+      to true. Volume 10%, 35ms duration, 8ms rate cap to avoid clipping on
+      chord double-hits.
+
 ### Not started
 
-- [ ] Stage 5: Polish (settings panel, score-history view, replay improvements).
 - [ ] Stage 6: Shipping (deploy backend, Chrome Web Store submission).
 
 ## Test counts
 
-- Backend: 24 pytest passing.
-- Extension: 34 vitest passing.
+- Backend: 32 pytest passing (added 3 hold-detect + 2 hand-balance tests).
+- Extension: 50 vitest passing.
 
 ## Stage status
 
@@ -99,7 +194,7 @@ notes are actually synced to audio.
 | 2 | [x] | Backend returns chart in <60s that follows the music | Verified on real YouTube audio with mix.wav |
 | 3 | [x] | Full song playable end-to-end | osu! scoring + 6-tier judgments + draggable HUD |
 | 4 | [~] | Friend on their own machine reports it feels tight | Calibration page implemented; in-the-wild test pending |
-| 5 | [ ] | Hand it to a stranger, they play through without help | Settings panel partial (only OD surfaced) |
+| 5 | [~] | Hand it to a stranger, they play through without help | Settings panel done; best-score on results; chord notes. Pause/resume countdown + lane FX pending |
 | 6 | [ ] | Backend deployed, extension submitted | Not started |
 
 ## How to verify chart sync (for anyone skeptical)

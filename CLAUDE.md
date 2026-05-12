@@ -40,11 +40,9 @@ The system has four major layers. Keep them strictly separated so each can be sw
    |  - Caches by (videoId, difficulty) to avoid recomputation
    |
 [ Chart Generation Pipeline (Python) ]
-      - Source separation (Demucs) -> stems
-      - Beat/tempo tracking (madmom or librosa)
-      - Onset detection per stem
-      - Lane assignment heuristic / ML model
-      - Difficulty shaping (note density, slider ratio)
+      - v1 (shipped): full-mix librosa beat + spectral-flux onsets + rule-based
+        lane assign + difficulty thinning (see docs/PIPELINE.md)
+      - Future: Demucs stems, madmom tempo, per-stem onsets, optional ML lanes
       - Output: Chart JSON
 ```
 
@@ -62,10 +60,9 @@ The Chart JSON is the contract between the backend and the extension. Define it 
 **Backend**
 - Python 3.11+
 - FastAPI + Uvicorn
-- Demucs (htdemucs) for source separation
-- madmom for beat tracking (fallback: librosa)
-- librosa for onset detection and feature extraction
-- yt-dlp for audio fetch (if going Option B)
+- librosa (+ soundfile) for v1 pipeline: beat track, onsets, resample/decode
+- yt-dlp (+ ffmpeg via imageio-ffmpeg) for Option B audio fetch when enabled
+- Demucs / madmom: planned upgrades when stem quality or tempo warrants it
 - Redis for chart cache (optional v1; SQLite is fine to start)
 - Hosted on a single GPU box or Modal/Replicate for the heavy ML calls
 
@@ -125,13 +122,9 @@ There are three clocks. Confusing them is the #1 source of "the game feels off" 
 
 User latency offset comes from a calibration screen the user runs once. They tap d/f/j/k along to a metronome; we measure the average offset between expected and actual taps. Persist it per user.
 
-The note hit window:
-- Perfect: ±25ms
-- Good: ±50ms
-- OK: ±100ms
-- Miss: >100ms or no hit by the time the note crosses the line
+On YouTube, the content script bridges `<video>` time into the overlay: periodic `BB_CLOCK_TICK`, plus `BB_VIDEO_PAUSED` / `BB_VIDEO_PLAYING` / `BB_VIDEO_SEEKED`. Pausing the video pauses the game loop (rAF). Seeking resets in-game note state and score against the same chart (no backend round trip). See docs/DECISIONS.md for the policy.
 
-These are starting values. Tune after playtesting.
+Hit windows are six-tier osu!mania-style with OD; see `extension/src/game/types.ts` and the popup OD slider. Legacy ±25/50/100ms bullets are obsolete.
 
 ## What is intentionally out of scope for v1
 
@@ -152,7 +145,7 @@ These are starting values. Tune after playtesting.
 ## Open questions to revisit at each stage gate
 
 1. Are we going tab capture (Option A) or videoId+yt-dlp (Option B)? Decide by end of Stage 1.
-2. Demucs is slow. Do we need full separation, or can we get acceptable charts from spectral flux on the full mix? Benchmark in Stage 2.
+2. Demucs is slow. Do we need full separation, or can we get acceptable charts from spectral flux on the full mix? v1 ships full-mix librosa only; benchmark stems when charts feel weak or ghost hits pile up.
 3. Lane assignment: rule-based (pitch buckets, drum hits) vs trained model. Start rule-based; revisit only if charts feel bad after Stage 3 playtesting.
 4. Where does the backend run? Local dev box is fine for Stage 1-3. For sharing/portfolio, deploy to Modal (cheap GPU on-demand) or a small Hetzner GPU box.
 
