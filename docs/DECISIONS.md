@@ -2,6 +2,86 @@
 
 Append-only log of decisions that shape the project. Each entry records the date, the question, the choice, and why.
 
+## 2026-05-12: In-overlay menu (no extension reload to change difficulty)
+
+**Question:** Changing difficulty mid-session required reloading the
+extension. SPA navigation to the next YouTube video force-closed the
+overlay panel and re-mounted it ~10s later. Both flows interrupted the
+player and made it hard to iterate on difficulty between songs.
+
+**Choice:** Add a `☰` button to the overlay header that opens an inline
+menu inside the iframe with difficulty, OD, note speed, opacity, hit
+sound, and hit volume. Start posts BB_REQUEST_NEW_CHART to the content
+script; the existing chart-fetch path returns the new chart via
+BB_LOAD_CHART without rebuilding the iframe. SPA navigation now keeps
+the overlay alive: pauses the new video, re-binds pause/play/seeked
+listeners to the new <video>, and posts BB_NEW_VIDEO to the overlay so
+it auto-opens the menu with the previous difficulty pre-selected.
+
+**Why:** Players were rage-quitting Hard within 10 seconds of starting
+because the only way to retry on Normal was to reload the extension and
+reposition the panel. The menu eliminates that friction. Keeping the
+overlay anchored across songs preserves panel position + scroll state +
+binding overrides for the whole session.
+
+**Revisit when:** Players want to change key bindings mid-session, or
+want to recalibrate without leaving the page. Both would extend the
+existing MenuPanel.
+
+## 2026-05-12: Mode chip in the menu (backend-pipeline awareness)
+
+**Question:** Without restarting the backend it's hard to know which
+pipeline is producing the chart on screen. A player switching from
+Baseline to ML-light has no way to verify the flag took effect.
+
+**Choice:** /healthz now returns an `ml` block (`beatThisFlag`,
+`beatThisActive`, `demucsFlag`). The overlay menu re-pings on every
+open and renders a compact chip: `≋ Baseline`, `♫ ML-light`, `♫◓ ML-full`,
+plus `⚠ ML flag, inactive` (flag set but package not importable),
+`⌛ Restart needed` (server up but no ml field, i.e. older build), `✕
+Down` (ping failed), `… Checking` (ping in flight). Color-coded:
+blue/amber/red/grey.
+
+**Why:** Earlier in development a 2-hour debugging session was wasted
+because Beat This! was off but the player thought it was on. A chip
+turns "is ML active?" from a CLI question into a glance. The chip also
+catches partial-failure states (e.g. flag on, package install broken)
+that would otherwise silently fall back to librosa.
+
+**Revisit when:** We add Phase 3 (MERT section detection). The chip
+will need a fourth symbol or a separate row.
+
+## 2026-05-12: Pause / seek / replay all run the 3-2-1 countdown
+
+**Question:** Players reported that mid-song actions (P pause, scrubbing
+the YouTube timeline, clicking Replay on the results card) either
+silently dropped them back in or left UI in a broken state. Specifically:
+P didn't work when the overlay had focus, scrubbing skipped the
+countdown, Replay restarted the song but left the results card on top.
+
+**Choice:**
+- Install a mirror `P` keydown listener inside the overlay iframe that
+  posts BB_REQUEST_VIDEO_TOGGLE to the parent. The content script
+  toggles the video; resume round-trips back as BB_VIDEO_PLAYING which
+  runs the existing 3-2-1.
+- BB_VIDEO_SEEKED now carries `wasPlaying`. Scrubbing while playing
+  triggers `scheduleCountdown()`; scrubbing while paused defers to the
+  next play-resume which already runs the countdown.
+- Replay sets `pendingReplayRef`, force-resets the BridgedClock to 0
+  paused, then re-mounts the GameLoop with `start({ startPaused: true })`.
+  The countdown's `resume()` at the end of 3-2-1 actually starts the
+  rAF for the first time, so the new loop's first tick never reads
+  the stale end-of-song clock.
+
+**Why:** Three different bug reports converged on "the loop fires
+onFinish reading a stale clock before the video seek completes." The
+startPaused option in GameLoop is the single root-cause fix; the rest
+is wiring + a defensive `seekToVideoTime(0)` so cursor/notes/score are
+clean before any ricochets land.
+
+**Revisit when:** We add a checkpoint / "skip to chorus" feature that
+also fires a seek. The same startPaused path should cover it.
+
 ## 2026-05-12: Demucs activated + per-stem onset cache
 
 **Question:** Demucs has been scaffolded for a while behind `USE_DEMUCS`.
