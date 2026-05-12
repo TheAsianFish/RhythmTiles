@@ -15,6 +15,20 @@ def test_healthz_ok() -> None:
     assert "version" in body
 
 
+def test_healthz_reports_ml_flags() -> None:
+    """The extension menu reads /healthz.ml to render the active-mode chip."""
+    app = create_app()
+    client = TestClient(app)
+    body = client.get("/healthz").json()
+    assert "ml" in body
+    ml = body["ml"]
+    # Baseline by default (the conftest unsets these flags). Just verify
+    # the shape; bool truthiness is what the frontend keys on.
+    assert isinstance(ml.get("beatThisFlag"), bool)
+    assert isinstance(ml.get("beatThisActive"), bool)
+    assert isinstance(ml.get("demucsFlag"), bool)
+
+
 def test_request_id_echoed() -> None:
     app = create_app()
     client = TestClient(app)

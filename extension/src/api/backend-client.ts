@@ -45,10 +45,21 @@ export async function pingHealth(): Promise<boolean> {
   return ok;
 }
 
+export interface BackendMlFlags {
+  // Whether the env flag is set. The flag can be on while the package is
+  // missing or broken; beatThisActive tells us what the pipeline will
+  // actually do at request time.
+  beatThisFlag: boolean;
+  beatThisActive: boolean;
+  demucsFlag: boolean;
+}
+
 export interface HealthPing {
   ok: boolean;
   error?: string;
   url: string;
+  ml?: BackendMlFlags;
+  version?: string;
 }
 
 export async function pingHealthDetailed(): Promise<HealthPing> {
@@ -63,7 +74,13 @@ export async function pingHealthDetailed(): Promise<HealthPing> {
       clearTimeout(timer);
     }
     if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}`, url };
-    return { ok: true, url };
+    // ml is optional in the response shape so older backends (pre-this
+    // commit) still register as healthy without a mode indicator.
+    const body = (await resp.json().catch(() => ({}))) as {
+      version?: string;
+      ml?: BackendMlFlags;
+    };
+    return { ok: true, url, version: body.version, ml: body.ml };
   } catch (e) {
     const msg = (e as Error).message;
     return { ok: false, error: msg.includes("abort") ? "Timed out (4s)" : msg, url };

@@ -226,11 +226,49 @@ canvas {
 }
 
 .menu-card h2 {
-  margin: 0 0 4px;
+  margin: 0;
   font-size: 14px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.85);
+}
+
+/* Header row inside the menu card: title on the left, backend-mode chip
+   on the right. The chip shows which ML pipeline the backend is running
+   in (baseline / ML-light / ML-full) as a compact symbol + short label. */
+.menu-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(95, 192, 255, 0.14);
+  border: 1px solid rgba(95, 192, 255, 0.35);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #cfe9ff;
+  cursor: help;
+  user-select: none;
+}
+
+.mode-chip-sym {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: "Segoe UI Symbol", "Apple Symbols", system-ui, sans-serif;
+  letter-spacing: 0;
+}
+
+.mode-chip-label {
+  font-variant-caps: all-small-caps;
 }
 
 .menu-row {

@@ -7,6 +7,7 @@ import { GameLoop } from "@/game/loop";
 import type { ClockSource } from "@/game/clock";
 import { accuracyPercent } from "@/game/scoring";
 import { hitWindowsForOD, type Judgment, type ScoreState } from "@/game/types";
+import { pingHealthDetailed, type BackendMlFlags } from "@/api/backend-client";
 import {
   loadSettings,
   saveSettings,
@@ -74,6 +75,61 @@ interface ResultsPayload {
 // can change difficulty / bindings / opacity without reloading the
 // extension. Clicking Start posts BB_REQUEST_NEW_CHART; the new chart
 // arrives via BB_LOAD_CHART and the menu auto-closes.
+// Maps the backend's ml flags to a compact symbolic mode chip. Examples:
+//   ≋  baseline (librosa, no ML)
+//   ♫  Beat This! only
+//   ♫◓ Beat This! + Demucs
+//   ⚠  flag on but package not active (silent fallback to librosa)
+//   ?  backend unreachable (we never got the ping back)
+function modeChipFor(ml: BackendMlFlags | null): { symbol: string; label: string; title: string } {
+  if (!ml) {
+    return {
+      symbol: "?",
+      label: "Backend ?",
+      title: "Backend not reachable. Check the server is running at the configured URL.",
+    };
+  }
+  const beat = ml.beatThisActive;
+  const beatFlagOnly = ml.beatThisFlag && !ml.beatThisActive;
+  const demucs = ml.demucsFlag;
+  if (!beat && !beatFlagOnly && !demucs) {
+    return {
+      symbol: "≋",
+      label: "Baseline",
+      title: "Heuristic pipeline: librosa beats, full-mix onsets, centroid-based lane routing.",
+    };
+  }
+  if (beat && demucs) {
+    return {
+      symbol: "♫◓",
+      label: "ML-full",
+      title:
+        "Beat This! beats and downbeats + Demucs per-stem onsets. Drum line on left hand, vocal melody on right.",
+    };
+  }
+  if (beat) {
+    return {
+      symbol: "♫",
+      label: "ML-light",
+      title: "Beat This! beats and downbeats; full-mix onsets with centroid routing.",
+    };
+  }
+  if (demucs && !beat) {
+    return {
+      symbol: "◓",
+      label: "Demucs only",
+      title: "Demucs per-stem onsets active; librosa beat tracker (no downbeats).",
+    };
+  }
+  // Flag on but inference path not available (package missing, device error).
+  return {
+    symbol: "⚠",
+    label: "ML flag, inactive",
+    title:
+      "USE_BEAT_THIS is set but beat_this is not importable. Pipeline silently uses librosa.",
+  };
+}
+
 function MenuPanel({
   difficulty,
   onDifficultyChange,
@@ -83,6 +139,7 @@ function MenuPanel({
   onCancel,
   loading,
   error,
+  backendMl,
 }: {
   difficulty: Difficulty;
   onDifficultyChange: (d: Difficulty) => void;
@@ -92,12 +149,20 @@ function MenuPanel({
   onCancel?: () => void;
   loading: boolean;
   error: string | null;
+  backendMl: BackendMlFlags | null;
 }) {
   const w = hitWindowsForOD(settings.overallDifficulty);
+  const mode = modeChipFor(backendMl);
   return (
     <div className="menu-overlay" role="dialog" aria-label="Menu">
       <div className="menu-card">
-        <h2>Menu</h2>
+        <div className="menu-card-header">
+          <h2>Menu</h2>
+          <div className="mode-chip" title={mode.title} aria-label={mode.title}>
+            <span className="mode-chip-sym">{mode.symbol}</span>
+            <span className="mode-chip-label">{mode.label}</span>
+          </div>
+        </div>
         <div className="menu-row">
           <label htmlFor="m-diff">Difficulty</label>
           <select
@@ -232,6 +297,9 @@ function App() {
   const [menuDifficulty, setMenuDifficulty] = useState<Difficulty>("normal");
   // True between "user clicked Start in menu" and "new chart arrived".
   const [menuLoading, setMenuLoading] = useState(false);
+  // Snapshot of the backend's active ML flags, fetched when the menu opens.
+  // null while the request is in flight or if the backend is unreachable.
+  const [backendMl, setBackendMl] = useState<BackendMlFlags | null>(null);
   const [dragging, setDragging] = useState(false);
   const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
   // Countdown state: null when no countdown is active, 3/2/1/0 (GO!) otherwise.
@@ -382,6 +450,7 @@ function App() {
             setMenuOpen(true);
             setMenuLoading(false);
             setErrorMsg(null);
+            void refreshBackendMode();
           })();
           break;
         }
@@ -621,7 +690,8 @@ function App() {
   async function openMenu() {
     // Pause the underlying video and the game loop. Snapshot the current
     // settings into the menu's editable copy so the user sees the same
-    // values the next loop mount would pick up.
+    // values the next loop mount would pick up. Also kick off a backend
+    // health ping so the menu can show which ML mode the server is in.
     cancelCountdown();
     window.parent.postMessage({ type: "BB_REQUEST_VIDEO_PAUSE" }, "*");
     const s = await loadSettings();
@@ -629,6 +699,15 @@ function App() {
     setMenuDifficulty(difficulty);
     setErrorMsg(null);
     setMenuOpen(true);
+    void refreshBackendMode();
+  }
+
+  async function refreshBackendMode() {
+    // Re-fetch each time we (re)show the menu so the indicator reflects
+    // any flag flip the user made on the backend side since last open.
+    setBackendMl(null);
+    const ping = await pingHealthDetailed();
+    setBackendMl(ping.ok && ping.ml ? ping.ml : null);
   }
 
   function closeMenuWithoutApplying() {
@@ -722,6 +801,7 @@ function App() {
           onCancel={chartReady ? closeMenuWithoutApplying : undefined}
           loading={menuLoading}
           error={errorMsg}
+          backendMl={backendMl}
         />
       )}
       {results && (
