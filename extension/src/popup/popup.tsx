@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { backendUrl, pingHealthDetailed } from "@/api/backend-client";
 import type { Difficulty } from "@/types/chart";
+import { hitWindowsForOD } from "@/game/types";
+import { loadSettings, saveSettings } from "@/utils/storage";
 
 type BackendStatus = "unknown" | "ok" | "down";
 
@@ -9,6 +11,7 @@ function App() {
   const [status, setStatus] = useState<BackendStatus>("unknown");
   const [healthError, setHealthError] = useState<string | null>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>("normal");
+  const [od, setOD] = useState<number>(8);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Keep a ref so the interval callback can read the latest status without
@@ -38,6 +41,21 @@ function App() {
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshHealth]);
+
+  // Load persisted OD setting on open; persist on change.
+  useEffect(() => {
+    void (async () => {
+      const s = await loadSettings();
+      setOD(s.overallDifficulty);
+    })();
+  }, []);
+  async function updateOD(next: number) {
+    setOD(next);
+    const s = await loadSettings();
+    await saveSettings({ ...s, overallDifficulty: next });
+  }
+
+  const windows = hitWindowsForOD(od);
 
   async function onStart() {
     setBusy(true);
@@ -107,7 +125,7 @@ function App() {
       </div>
 
       <div className="row">
-        <label htmlFor="difficulty">Difficulty</label>
+        <label htmlFor="difficulty">Chart density</label>
         <select
           id="difficulty"
           value={difficulty}
@@ -117,6 +135,26 @@ function App() {
           <option value="normal">Normal</option>
           <option value="hard">Hard</option>
         </select>
+      </div>
+
+      <div className="row">
+        <label htmlFor="od">Timing strictness (OD)</label>
+        <select
+          id="od"
+          value={od}
+          onChange={(e) => void updateOD(Number(e.target.value))}
+        >
+          <option value={5}>Lenient (OD 5)</option>
+          <option value={7}>Standard (OD 7)</option>
+          <option value={8}>Challenging (OD 8)</option>
+          <option value={9}>Strict (OD 9)</option>
+          <option value={10}>Extreme (OD 10)</option>
+        </select>
+      </div>
+      <div className="hint" style={{ marginTop: -8 }}>
+        At OD {od}: MAX &plusmn;{windows.max.toFixed(1)}ms, GREAT &plusmn;{windows.great.toFixed(0)}ms,
+        GOOD &plusmn;{windows.good.toFixed(0)}ms, OK &plusmn;{windows.ok.toFixed(0)}ms,
+        MEH &plusmn;{windows.meh.toFixed(0)}ms.
       </div>
 
       <button className="primary" onClick={onStart} disabled={busy || status === "down"}>
