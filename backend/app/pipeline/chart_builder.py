@@ -30,6 +30,48 @@ from app.pipeline.onset_detect import detect_onsets
 logger = logging.getLogger("beatbridge.pipeline")
 
 
+# Window used to smooth RMS into a "section energy" curve. Roughly the
+# length of a musical phrase so individual beats and bars don't dominate.
+_ENERGY_WINDOW_S = 4.0
+
+
+def _energy_buckets_for_notes(
+    *,
+    notes,
+    y: np.ndarray,
+    sr: int,
+) -> list[int]:
+    """Bucket each note into 0 (low), 1 (medium), 2 (high) by local energy.
+
+    Computes a smoothed RMS curve over `_ENERGY_WINDOW_S`-second windows,
+    samples it at each note's time, then quantile-buckets by the 33/67
+    percentile thresholds across all sampled values.
+    """
+    if not notes:
+        return []
+    import librosa  # noqa: WPS433
+
+    hop = max(1, int(sr * (_ENERGY_WINDOW_S / 4.0)))
+    frame_length = max(hop * 2, int(sr * _ENERGY_WINDOW_S))
+    rms = librosa.feature.rms(y=y, frame_length=frame_length, hop_length=hop)[0]
+    if len(rms) == 0:
+        return [1] * len(notes)
+    frame_times = np.arange(len(rms), dtype=np.float32) * hop / sr
+    note_times = np.fromiter((n.t for n in notes), dtype=np.float32, count=len(notes))
+    note_energies = np.interp(note_times, frame_times, rms)
+    q33 = float(np.quantile(note_energies, 0.33))
+    q67 = float(np.quantile(note_energies, 0.67))
+    buckets: list[int] = []
+    for e in note_energies:
+        if e < q33:
+            buckets.append(0)
+        elif e > q67:
+            buckets.append(2)
+        else:
+            buckets.append(1)
+    return buckets
+
+
 def load_audio_to_mono(audio_bytes: bytes, target_sr: int = 22050) -> tuple[np.ndarray, int]:
     """Decode arbitrary audio bytes to a mono float32 numpy array at target_sr.
 
@@ -84,7 +126,13 @@ def build_chart_from_audio(
     if beat_info.bpm and beat_info.bpm > 0:
         beat_period_s = 60.0 / beat_info.bpm
     raw_notes = assign_lanes(onsets=onsets, y=y, sr=sr, beat_period_s=beat_period_s)
-    thinned = shape_difficulty(notes=raw_notes, difficulty=difficulty, beats=beat_info.beats)
+    energy_buckets = _energy_buckets_for_notes(notes=raw_notes, y=y, sr=sr)
+    thinned = shape_difficulty(
+        notes=raw_notes,
+        difficulty=difficulty,
+        beats=beat_info.beats,
+        energy_buckets=energy_buckets,
+    )
     notes = detect_holds(
         notes=thinned,
         y=y,

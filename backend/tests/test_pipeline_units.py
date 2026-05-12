@@ -298,6 +298,35 @@ def test_assign_lanes_does_not_balance_when_gap_is_large() -> None:
     assert all(n.lane in (0, 1) for n in notes), f"unexpected lanes: {[n.lane for n in notes]}"
 
 
+def test_shape_difficulty_with_energy_buckets_keeps_more_in_high() -> None:
+    # 60 notes alternating lanes. First half tagged low-energy (bucket 0),
+    # second half tagged high-energy (bucket 2). With density target = easy
+    # the shaper should keep more of the high-energy notes than the low.
+    beats = [i * 0.5 for i in range(11)]
+    notes = [RawNote(t=i * 0.083, lane=i % 4) for i in range(60)]
+    buckets = [0] * 30 + [2] * 30
+    shaped = shape_difficulty(
+        notes=notes,
+        difficulty="easy",
+        beats=beats,
+        energy_buckets=buckets,
+    )
+    low_kept = sum(1 for n in shaped if n.t < 30 * 0.083)
+    high_kept = sum(1 for n in shaped if n.t >= 30 * 0.083)
+    assert high_kept > low_kept, f"expected denser chorus: low={low_kept} high={high_kept}"
+
+
+def test_shape_difficulty_uniform_when_no_buckets() -> None:
+    # No energy_buckets parameter: behavior should match the old uniform thin.
+    beats = [i * 0.5 for i in range(11)]
+    notes = [RawNote(t=i * 0.083, lane=i % 4) for i in range(60)]
+    without_buckets = shape_difficulty(notes=notes, difficulty="easy", beats=beats)
+    with_uniform_buckets = shape_difficulty(
+        notes=notes, difficulty="easy", beats=beats, energy_buckets=[1] * 60,
+    )
+    assert [n.t for n in without_buckets] == [n.t for n in with_uniform_buckets]
+
+
 def test_assign_lanes_no_chords_when_too_few_onsets() -> None:
     # Below MIN_ONSETS_FOR_CHORDS, the threshold is +inf so no chord can fire.
     onsets = [

@@ -11,6 +11,11 @@ gap is satisfied. A note whose lane differs from the previous kept note can
 slot in at a tighter gap so we preserve lane variety (the previous stride
 implementation collapsed alternating lanes into a single-lane chain on stride
 2, which is the worst-case pattern for a 4-lane game).
+
+Per-section density variation: when `energy_buckets` is provided, each note's
+local min_gap is scaled by the bucket's density multiplier (0 = low energy,
+larger gap; 2 = high energy, smaller gap). The result is denser playable
+notes during the chorus and a breathing room during quiet verses.
 """
 
 from __future__ import annotations
@@ -29,13 +34,27 @@ _DENSITY_TARGETS = {
 # combined density close to target while breaking up same-lane chains.
 _LANE_VARIETY_FACTOR = 0.6
 
+# Density multiplier per energy bucket. Bucket 0 = low energy (verse), 1 =
+# medium, 2 = high energy (chorus). 0.75 / 1.0 / 1.30 swings density by
+# about a third in each direction, which is enough to feel different
+# without making the chart density unpredictable.
+_BUCKET_DENSITY_MULT = (0.75, 1.00, 1.30)
+
 
 def shape_difficulty(
     *,
     notes: list[RawNote],
     difficulty: str,
     beats: list[float],
+    energy_buckets: list[int] | None = None,
 ) -> list[RawNote]:
+    """Thin a dense raw-note list down toward the target density.
+
+    `energy_buckets` is an optional list parallel to `notes` (one bucket per
+    note, value in {0, 1, 2}). When provided, each note's local min_gap is
+    scaled by `_BUCKET_DENSITY_MULT[bucket]` so chorus sections keep more
+    notes than verses.
+    """
     if not notes:
         return notes
     target = _DENSITY_TARGETS.get(difficulty, 1.5)
@@ -53,27 +72,37 @@ def shape_difficulty(
     if current_density <= target * 1.05:
         return notes
 
-    min_gap = avg_beat_period / target  # seconds between hits at target density
-    tight_gap = min_gap * _LANE_VARIETY_FACTOR
+    base_min_gap = avg_beat_period / target
+
+    def bucket_for(index: int) -> int:
+        if not energy_buckets or index >= len(energy_buckets):
+            return 1
+        b = energy_buckets[index]
+        return b if b in (0, 1, 2) else 1
 
     kept: list[RawNote] = []
     last_t = -1e9
     last_lane = -1
-    for n in notes:
+    for i, n in enumerate(notes):
         gap = n.t - last_t
         # Chord partner: same-t note as the previously kept one. Always keep
         # so the pair survives thinning. Lane assigner only emits chords with
         # distinct lanes so we don't need to re-check that here.
         if last_t > -1e8 and abs(gap) < 1e-6 and n.lane != last_lane:
             kept.append(n)
-            # last_t stays at the chord's onset time so the next non-chord
-            # note still needs to clear min_gap from the chord.
             continue
-        if gap >= min_gap:
+
+        # Per-note thresholds. High-energy chorus notes get tighter gaps
+        # (more notes kept); low-energy verse notes get larger gaps.
+        density_mult = _BUCKET_DENSITY_MULT[bucket_for(i)]
+        local_min_gap = base_min_gap / density_mult
+        local_tight_gap = local_min_gap * _LANE_VARIETY_FACTOR
+
+        if gap >= local_min_gap:
             kept.append(n)
             last_t = n.t
             last_lane = n.lane
-        elif n.lane != last_lane and gap >= tight_gap:
+        elif n.lane != last_lane and gap >= local_tight_gap:
             kept.append(n)
             last_t = n.t
             last_lane = n.lane
