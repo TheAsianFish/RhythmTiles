@@ -87,6 +87,10 @@ function App() {
   // Tracks whether the video has ever played for this chart. The first
   // BB_VIDEO_PLAYING skips the countdown (initial start, not a resume).
   const everPlayedRef = useRef(false);
+  // Set by restart(): the next chart re-mount should seek the video to 0
+  // and start a countdown rather than waiting for the user to press play.
+  // Read once by the loop-boot useEffect, cleared immediately after.
+  const pendingReplayRef = useRef(false);
 
   // Resize handler. Canvas is flex:1 inside a flex column, so the size we
   // want is its rendered bounding box, not the iframe viewport.
@@ -342,6 +346,26 @@ function App() {
       });
       loop.start(window);
       loopRef.current = loop;
+
+      // Replay sequence: this is a re-mount triggered by the Replay button.
+      // Pause the video, seek to 0, then run the countdown over the fresh
+      // loop. We schedule the seek + countdown after a tick so the loop's
+      // input listeners are fully attached before any video events ricochet.
+      if (pendingReplayRef.current) {
+        pendingReplayRef.current = false;
+        everPlayedRef.current = true; // ensure the play() at end of countdown doesn't skip it
+        window.setTimeout(() => {
+          if (cancelled) return;
+          window.parent.postMessage({ type: "BB_REQUEST_VIDEO_SEEK", t: 0 }, "*");
+          // scheduleCountdown pauses the video, ticks 3-2-1, and plays.
+          // We pause/seek first so the player doesn't briefly hear audio
+          // from the previous play position while the countdown spins up.
+          window.setTimeout(() => {
+            if (cancelled) return;
+            scheduleCountdown();
+          }, 80);
+        }, 30);
+      }
     })();
 
     return () => {
@@ -395,9 +419,17 @@ function App() {
   }
 
   function restart() {
+    // Replay: rebuild the loop with a fresh score state, seek the video
+    // back to 0, run a 3-2-1 countdown, then resume. The loop-boot
+    // useEffect reads pendingReplayRef and orchestrates the seek +
+    // countdown once the new loop is mounted.
+    cancelCountdown();
     setResults(null);
     setChartReady(false);
-    // Re-trigger by clearing chart momentarily.
+    pendingReplayRef.current = true;
+    // Pause the video up front so it does not keep playing audio from the
+    // previous position while the new loop spins up.
+    window.parent.postMessage({ type: "BB_REQUEST_VIDEO_PAUSE" }, "*");
     const c = chart;
     setChart(null);
     setTimeout(() => setChart(c), 30);

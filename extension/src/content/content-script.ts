@@ -462,5 +462,14 @@ window.addEventListener("message", (ev) => {
         videoEl.pause();
       }
       break;
+    case "BB_REQUEST_VIDEO_SEEK":
+      // Posted by the overlay's Replay button (and any future "jump to
+      // section" UI). Sets the video's currentTime; YouTube fires a
+      // 'seeked' event which round-trips through onSeek as BB_VIDEO_SEEKED.
+      if (!videoEl) break;
+      try {
+        videoEl.currentTime = Math.max(0, Number(msg.t) || 0);
+      } catch { /* ignore */ }
+      break;
   }
 });
