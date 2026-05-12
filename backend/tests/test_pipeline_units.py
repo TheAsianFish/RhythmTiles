@@ -350,6 +350,48 @@ def test_beat_fill_inserts_synthetics_in_long_empty_runs() -> None:
         assert abs(t - nearest) < 0.01, f"synthetic {t} not on a beat (nearest {nearest})"
 
 
+def test_subdivision_augment_inserts_half_beats_for_hard() -> None:
+    import numpy as np
+
+    from app.pipeline.beat_fill import add_subdivision_onsets
+    from app.pipeline.onset_detect import Onset
+
+    # 4s of audible noise so RMS is well above threshold everywhere.
+    sr = 22050
+    rng = np.random.default_rng(0)
+    y = (rng.uniform(-0.5, 0.5, int(sr * 4.0))).astype(np.float32)
+
+    # 8 beats at 120 BPM. Real onsets on every beat. No subdivisions.
+    beats = [i * 0.5 for i in range(8)]
+    onsets = [
+        Onset(t=b, strength=1.0, centroid_hz=1000.0) for b in beats
+    ]
+
+    out_normal = add_subdivision_onsets(onsets, beats, y=y, sr=sr, difficulty="normal")
+    out_hard = add_subdivision_onsets(onsets, beats, y=y, sr=sr, difficulty="hard")
+    out_expert = add_subdivision_onsets(onsets, beats, y=y, sr=sr, difficulty="expert")
+
+    assert len(out_normal) == len(onsets), "normal should not add subdivisions"
+    assert len(out_hard) > len(onsets), "hard should add half-beat subdivisions"
+    assert len(out_expert) > len(out_hard), "expert should add even more"
+
+
+def test_subdivision_augment_skips_silent_audio() -> None:
+    import numpy as np
+
+    from app.pipeline.beat_fill import add_subdivision_onsets
+    from app.pipeline.onset_detect import Onset
+
+    sr = 22050
+    y = np.zeros(int(sr * 4.0), dtype=np.float32)  # pure silence
+    beats = [i * 0.5 for i in range(8)]
+    onsets = [Onset(t=b, strength=1.0, centroid_hz=1000.0) for b in beats]
+
+    out = add_subdivision_onsets(onsets, beats, y=y, sr=sr, difficulty="expert")
+    # No audio energy at the half-beats, so no subdivision should fire.
+    assert len(out) == len(onsets)
+
+
 def test_beat_fill_preserves_short_empty_runs() -> None:
     from app.pipeline.beat_fill import fill_empty_beats
     from app.pipeline.onset_detect import Onset

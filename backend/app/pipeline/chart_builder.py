@@ -22,7 +22,7 @@ from app.models import (
     PIPELINE_VERSION,
 )
 from app.config import settings
-from app.pipeline.beat_fill import fill_empty_beats
+from app.pipeline.beat_fill import add_subdivision_onsets, fill_empty_beats
 from app.pipeline.beat_track import detect_beats
 from app.pipeline.difficulty import shape_difficulty
 from app.pipeline.hold_detect import detect_holds
@@ -160,6 +160,19 @@ def build_chart_from_audio(
         logger.info(
             "beat-grid fill added %d synthetic onsets to cover empty runs",
             len(onsets) - onsets_before_fill,
+        )
+    # Subdivision augmentation: insert half-beat (Hard/Expert) and
+    # quarter-beat (Expert in dense sections) candidates plus crescendo
+    # subdivisions so the thinner has material to keep at higher tiers.
+    onsets_before_subdiv = len(onsets)
+    onsets = add_subdivision_onsets(
+        onsets, beat_info.beats, y=y, sr=sr, difficulty=difficulty,
+    )
+    if len(onsets) != onsets_before_subdiv:
+        logger.info(
+            "subdivision augment added %d candidate onsets for difficulty=%s",
+            len(onsets) - onsets_before_subdiv,
+            difficulty,
         )
     beat_period_s: float | None = None
     if beat_info.bpm and beat_info.bpm > 0:
