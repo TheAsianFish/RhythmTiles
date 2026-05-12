@@ -1,14 +1,19 @@
 // Tiny synth for game SFX. We avoid shipping an audio asset by generating a
-// short noise burst on the fly. Lazily creates the AudioContext on first use
-// so we don't trip Chrome's autoplay policy (each note press IS a user
-// gesture, which is enough to satisfy the policy when ctx.resume() runs).
+// short osu!mania-style hit tick on the fly. Lazily creates the AudioContext
+// on first use so we don't trip Chrome's autoplay policy (each note press IS
+// a user gesture, which is enough to satisfy the policy when ctx.resume()
+// runs).
 
-const CLICK_DURATION_S = 0.035;
-// Runtime-tunable gain. Defaults loud enough to clearly punctuate hits but
-// not louder than typical music levels. The popup's volume slider calls
-// setHitVolume to change this without rebuilding.
+const CLICK_DURATION_S = 0.045;
+// Runtime-tunable gain. The popup's volume slider calls setHitVolume to
+// change this without rebuilding.
 const DEFAULT_CLICK_GAIN = 0.40;
-const CLICK_DECAY_S = 0.006;    // sharp, percussive envelope
+// Osu!mania normal-hitnormal: a short tonal tick around 1.8kHz with a fast
+// noise transient at the front. Tuned by ear against the stock skin.
+const TICK_FREQ_HZ = 1800;
+const TICK_DECAY_S = 0.012;
+const NOISE_DECAY_S = 0.004;
+const NOISE_MIX = 0.35;
 
 let ctx: AudioContext | null = null;
 let clickBuffer: AudioBuffer | null = null;
@@ -71,13 +76,29 @@ function ensureClickBuffer(audioCtx: AudioContext): AudioBuffer {
   const length = Math.floor(sr * CLICK_DURATION_S);
   const buf = audioCtx.createBuffer(1, length, sr);
   const data = buf.getChannelData(0);
-  const decaySamples = Math.max(1, sr * CLICK_DECAY_S);
-  // White noise with an exponential decay envelope. Sounds like a soft
-  // finger-tap on a pad rather than a metronome click, which sits better
-  // under music.
+  // Damped sine tick + very short noise transient at the front. The tonal
+  // tick gives the recognizable osu!mania pitch, the noise gives it the
+  // initial snap. Both share i=0 as t=0 and decay exponentially.
+  const omega = 2 * Math.PI * TICK_FREQ_HZ;
+  const tickDecaySamples = Math.max(1, sr * TICK_DECAY_S);
+  const noiseDecaySamples = Math.max(1, sr * NOISE_DECAY_S);
+  let peak = 0;
   for (let i = 0; i < length; i++) {
-    const env = Math.exp(-i / decaySamples);
-    data[i] = (Math.random() * 2 - 1) * env;
+    const t = i / sr;
+    const tickEnv = Math.exp(-i / tickDecaySamples);
+    const noiseEnv = Math.exp(-i / noiseDecaySamples);
+    const tick = Math.sin(omega * t) * tickEnv;
+    const noise = (Math.random() * 2 - 1) * noiseEnv * NOISE_MIX;
+    const v = tick + noise;
+    data[i] = v;
+    if (Math.abs(v) > peak) peak = Math.abs(v);
+  }
+  // Normalize so the loudest sample sits at -3 dBFS regardless of how
+  // constructive interference fell between the tick and noise terms.
+  if (peak > 0) {
+    const target = 0.708;
+    const k = target / peak;
+    for (let i = 0; i < length; i++) data[i] *= k;
   }
   clickBuffer = buf;
   return buf;

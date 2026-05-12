@@ -16,11 +16,11 @@ const CLOCK_TICK_MS = 16;
 // Panel geometry. Sits on the right side of the YouTube viewport, descending
 // from below the top nav bar so the video stays unobstructed. Width and max
 // height are capped so the panel reads as a floating widget rather than a
-// full-screen takeover. At 620px height the renderer still has ~800ms of
-// note travel which is plenty of lead time for any song.
+// full-screen takeover. Taller panel (~20% vs the 620/420 caps) gives more
+// pixels of runway above the hit line so notes are on-screen longer at 1x speed.
 const PANEL_WIDTH = 320;
-const PANEL_MAX_HEIGHT = 620;
-const PANEL_MIN_HEIGHT = 420;
+const PANEL_MAX_HEIGHT = 744;
+const PANEL_MIN_HEIGHT = 504;
 const PANEL_MARGIN_RIGHT = 24;
 const PANEL_MARGIN_TOP = 72;
 const PANEL_MARGIN_BOTTOM = 24;
@@ -116,8 +116,24 @@ function detachVideoListeners() {
 function attachKeyCapture() {
   if (keyDownHandler) return;
   keyDownHandler = (ev: KeyboardEvent) => {
-    if (!boundCodes.has(ev.code)) return;
     if (isTypingInEditable(ev.target)) return; // let users type into inputs normally
+    // P toggles the underlying video. We swallow the keypress so YouTube's
+    // own P shortcut (picture-in-picture) doesn't also fire. The video's
+    // play/pause events round-trip through onPlay/onPause below, and the
+    // overlay's BB_VIDEO_PLAYING handler runs the 3-2-1 countdown on resume.
+    // Only intercept if the user hasn't rebound KeyP to a lane.
+    if (ev.code === "KeyP" && !boundCodes.has("KeyP") && overlay && videoEl) {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      if (ev.repeat) return;
+      if (videoEl.paused || videoEl.ended) {
+        void videoEl.play().catch(() => {});
+      } else {
+        videoEl.pause();
+      }
+      return;
+    }
+    if (!boundCodes.has(ev.code)) return;
     // stopImmediatePropagation prevents any other listeners on the same
     // target (including YouTube's player shortcuts) from running. capture:
     // true ensures we fire before bubble-phase listeners.
