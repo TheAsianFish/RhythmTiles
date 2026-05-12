@@ -397,6 +397,47 @@ def test_shape_difficulty_uniform_when_no_buckets() -> None:
     assert [n.t for n in without_buckets] == [n.t for n in with_uniform_buckets]
 
 
+def test_snap_onsets_to_beats_pulls_close_onsets() -> None:
+    from app.pipeline.onset_detect import Onset, snap_onsets_to_beats
+
+    beats = [0.0, 0.5, 1.0, 1.5, 2.0]
+    onsets = [
+        Onset(t=0.502, strength=1.0, centroid_hz=500),  # within tolerance of 0.5
+        Onset(t=1.018, strength=1.0, centroid_hz=500),  # within tolerance of 1.0
+        Onset(t=1.250, strength=1.0, centroid_hz=500),  # off-beat, outside tolerance
+    ]
+    out = snap_onsets_to_beats(onsets, beats, snap_tolerance_s=0.025)
+    times = [o.t for o in out]
+    assert times[0] == 0.5, f"snap failed: {times[0]}"
+    assert times[1] == 1.0, f"snap failed: {times[1]}"
+    assert times[2] == 1.25, f"off-beat onset should not snap: {times[2]}"
+
+
+def test_merge_keeps_close_onsets_with_different_centroids() -> None:
+    from app.pipeline.onset_detect import Onset, _merge_onset_lists
+
+    # Two onsets 20ms apart with VERY different spectral centroids represent
+    # distinct events (e.g. kick + hat at the same instant). Should NOT merge.
+    a = [Onset(t=1.000, strength=0.8, centroid_hz=200)]
+    b = [Onset(t=1.020, strength=0.6, centroid_hz=4000)]
+    out = _merge_onset_lists(a, b)
+    assert len(out) == 2, f"distinct-centroid onsets should not merge: {out}"
+
+
+def test_merge_dedupes_close_onsets_with_similar_centroids() -> None:
+    from app.pipeline.onset_detect import Onset, _merge_onset_lists
+
+    # Same-instrument duplicate detection from two pipelines: same centroid,
+    # near-simultaneous. SHOULD merge, keeping the earlier one.
+    a = [Onset(t=1.000, strength=0.6, centroid_hz=2000)]
+    b = [Onset(t=1.020, strength=0.9, centroid_hz=2050)]
+    out = _merge_onset_lists(a, b)
+    assert len(out) == 1, "duplicate detection should merge"
+    assert out[0].t == 1.000, f"earlier time should win: {out[0].t}"
+    # Stronger strength wins on the merged onset.
+    assert out[0].strength == 0.9
+
+
 def test_beat_fill_inserts_synthetics_in_long_empty_runs() -> None:
     from app.pipeline.beat_fill import fill_empty_beats
     from app.pipeline.onset_detect import Onset

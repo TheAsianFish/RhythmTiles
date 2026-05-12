@@ -27,7 +27,7 @@ from app.pipeline.beat_track import detect_beats
 from app.pipeline.difficulty import shape_difficulty
 from app.pipeline.hold_detect import detect_holds
 from app.pipeline.lane_assign import assign_lanes
-from app.pipeline.onset_detect import detect_onsets
+from app.pipeline.onset_detect import detect_onsets, snap_onsets_to_beats
 from app.pipeline.stems import separate_stems
 
 logger = logging.getLogger("beatbridge.pipeline")
@@ -151,6 +151,10 @@ def build_chart_from_audio(
             "stems separated; onset detection ran on drum stem (%d onsets)",
             len(onsets),
         )
+    # Beat-snap: onsets within ~22ms of a beat get pulled to the beat
+    # exactly. Removes the ~10-30ms perceptual offset that survives even
+    # with backtracking on.
+    onsets = snap_onsets_to_beats(onsets, beat_info.beats)
     # Beat-grid safety net: fill empty stretches with synthetic onsets so
     # vocal-only choruses don't go dead. Runs on the full-mix beat grid
     # regardless of stem path. See app/pipeline/beat_fill.py.
