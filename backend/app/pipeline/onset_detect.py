@@ -52,12 +52,18 @@ class Onset:
     centroid_hz: float      # spectral centroid at the onset frame
 
 
-def detect_onsets(*, y: "np.ndarray", sr: int, hop_length: int = 512) -> list[Onset]:
+def detect_onsets(*, y: "np.ndarray", sr: int, hop_length: int = 256) -> list[Onset]:
     """Combined energy + CQT + harmonic onset detection on the given audio.
 
     For each detected onset frame we sample the spectral centroid so the
     lane assigner can route low-frequency hits (kicks) to the left lanes
     and high-frequency hits (snares, hi-hats, vocals) to the right.
+
+    hop_length default is 256 (~11.6ms at 22050 Hz) for finer onset timing
+    precision. Previously 512 (~23ms), which quantized each onset by up to
+    11.6ms and showed up as audible lag/drift. Halving the hop doubles
+    onset-detect compute time on cold start but the cost is small in the
+    overall pipeline budget.
     """
     import librosa  # noqa: WPS433
 

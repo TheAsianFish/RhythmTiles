@@ -19,12 +19,40 @@ const _earlyListener = (ev: MessageEvent) => {
 window.addEventListener("message", _earlyListener);
 
 // A clock that's fed by postMessage ticks from the parent (content script).
+// Ticks arrive every ~16ms; between ticks we interpolate using performance.now()
+// so the game loop sees sub-millisecond precision instead of a value stale by
+// up to 16ms. Interpolation is clamped to MAX_EXTRAPOLATE_MS forward so a
+// dropped or delayed tick doesn't let the clock run off into the future.
 class BridgedClock implements ClockSource {
-  currentTime = 0;
-  paused = true;
+  private static MAX_EXTRAPOLATE_MS = 50;
+  private baseCurrentTime = 0;
+  private basePerfMs = 0;
+  private _paused = true;
+
   set(t: number, paused: boolean) {
-    this.currentTime = t;
-    this.paused = paused;
+    this.baseCurrentTime = t;
+    this.basePerfMs = performance.now();
+    this._paused = paused;
+  }
+
+  get paused(): boolean {
+    return this._paused;
+  }
+
+  set paused(v: boolean) {
+    // Resume transition: rebase perfMs so interpolation doesn't add the
+    // pause interval to currentTime before the next tick arrives.
+    if (this._paused && !v) {
+      this.basePerfMs = performance.now();
+    }
+    this._paused = v;
+  }
+
+  get currentTime(): number {
+    if (this._paused) return this.baseCurrentTime;
+    const delta = performance.now() - this.basePerfMs;
+    const clamped = Math.min(delta, BridgedClock.MAX_EXTRAPOLATE_MS);
+    return this.baseCurrentTime + clamped / 1000;
   }
 }
 
@@ -156,7 +184,9 @@ function App() {
           break;
         case "BB_VIDEO_SEEKED": {
           const seekTime = m.currentTime as number;
-          clockRef.current.currentTime = seekTime;
+          // currentTime is a getter now (interpolating); rebase the clock
+          // via set() so the next read returns the seeked time exactly.
+          clockRef.current.set(seekTime, clockRef.current.paused);
           loopRef.current?.seekToVideoTime(seekTime);
           rendererRef.current?.resetAnim();
           break;
