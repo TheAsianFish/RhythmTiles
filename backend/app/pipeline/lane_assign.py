@@ -143,15 +143,12 @@ def assign_lanes(
     n_downbeats = len(downbeat_set) if downbeat_set else 0
 
     for onset in onsets:
-        # Stem source overrides centroid when present (Phase 2 of the ML
-        # plan): drum and bass onsets get routed to the LOW band (lanes
-        # 0/1), vocal onsets to the HIGH band (lanes 2/3). When the onset
-        # carries no stem label (heuristic fallback or "other" stem), we
-        # fall back to the centroid-based band split. This matches the
-        # "drum stems route by instrument rather than band" intuition in
-        # docs/DECISIONS.md and gives kick/snare lines a consistent home
-        # on the left hand even on bright-heavy mixes where the centroid
-        # would otherwise float them to the right.
+        # Band routing is purely centroid-driven. Earlier versions routed
+        # drum-stem onsets to the low band and vocal-stem onsets to the
+        # high band, but that locked each hand to one instrument and
+        # killed per-lane musical variety. Per-stem onset detection
+        # still produces cleaner timing (Demucs is worth running), but
+        # the stem tag does NOT decide which lane the note lands in.
         low = _band_from_onset(onset, cutoff=cutoff)
         t_rounded = round(float(onset.t), 4)
         in_stream = (onset.t - prev_t) < stream_gap_s
@@ -290,14 +287,14 @@ def _median_centroid(onsets: list[Onset]) -> float:
 def _band_from_onset(onset: Onset, *, cutoff: float) -> bool:
     """Return True for low-band (lanes 0/1), False for high-band (lanes 2/3).
 
-    Stem labels (set by per-stem onset detection in the Demucs path)
-    take precedence over centroid. drums/bass -> low, vocals -> high,
-    anything else (or no stem) -> centroid split. The centroid fallback
-    is what we did pre-stems and what the heuristic pipeline still does.
+    Pure centroid split across all four lanes regardless of which stem
+    the onset came from. An earlier design routed drums/bass to the low
+    band and vocals to the high band, which gave each hand a dedicated
+    instrument; playtesting found that locked too much musical variety
+    out of each lane (left hand became "the drum hand"). Now the stem
+    tag is informational only - it survives on the Onset for future
+    features (e.g. stem-aware chord-accent rules) but does NOT decide
+    lane placement. Cleaner per-stem onset timing is still the main
+    reason to run Demucs.
     """
-    stem = getattr(onset, "stem", None)
-    if stem == "drums" or stem == "bass":
-        return True
-    if stem == "vocals":
-        return False
     return onset.centroid_hz < cutoff
