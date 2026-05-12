@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { backendUrl, pingHealthDetailed } from "@/api/backend-client";
+import {
+  backendUrl,
+  pingHealthDetailed,
+  type BackendMlFlags,
+} from "@/api/backend-client";
 import type { Difficulty } from "@/types/chart";
 import { hitWindowsForOD } from "@/game/types";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type UserSettings } from "@/utils/storage";
+import { describeProgress, formatElapsed } from "@/utils/loading-progress";
 
 type BackendStatus = "unknown" | "ok" | "down";
 
@@ -78,6 +83,34 @@ function KeyCapture({
   );
 }
 
+// Compact progress display shown while the popup waits on the chart
+// fetch. Same stage prediction as the in-overlay menu, but sized to the
+// popup's narrow column. The popup auto-closes once the content script
+// responds with ok, so this is visible only during the actual wait.
+function PopupLoadingProgress({ flags }: { flags: BackendMlFlags | null }) {
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const startRef = useRef<number>(performance.now());
+  useEffect(() => {
+    startRef.current = performance.now();
+    setElapsedMs(0);
+    const id = window.setInterval(() => {
+      setElapsedMs(performance.now() - startRef.current);
+    }, 500);
+    return () => window.clearInterval(id);
+  }, []);
+  const view = describeProgress(elapsedMs, flags);
+  return (
+    <div className={`popup-progress${view.warn ? " popup-progress-warn" : ""}`}>
+      <div className="popup-progress-head">
+        <span className="popup-progress-time">{formatElapsed(elapsedMs)}</span>
+        <span className="popup-progress-stage">{view.stage}</span>
+      </div>
+      <div className="popup-progress-hint">{view.hint}</div>
+      <div className="popup-progress-eta">Expected: {view.expectedTotal}</div>
+    </div>
+  );
+}
+
 function App() {
   const [status, setStatus] = useState<BackendStatus>("unknown");
   const [healthError, setHealthError] = useState<string | null>(null);
@@ -86,6 +119,10 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // Latest backend ML flag snapshot from /healthz, used by the loading
+  // progress display when busy=true so we predict the right stage
+  // (Demucs vs not, MERT vs not).
+  const [backendMl, setBackendMl] = useState<BackendMlFlags | null>(null);
   // Keep a ref so the interval callback can read the latest status without
   // being in the effect deps (which would cause an infinite re-run loop).
   const statusRef = useRef<BackendStatus>("unknown");
@@ -99,6 +136,7 @@ function App() {
     setStatus(next);
     statusRef.current = next;
     setHealthError(ping.ok ? null : ping.error ?? "unknown error");
+    setBackendMl(ping.ok && ping.ml ? ping.ml : null);
   }, []);
 
   useEffect(() => {
@@ -240,8 +278,10 @@ function App() {
       </div>
 
       <button className="primary" onClick={onStart} disabled={busy || status === "down"}>
-        {busy ? "Starting..." : "Start Game"}
+        {busy ? "Starting…" : "Start Game"}
       </button>
+
+      {busy && <PopupLoadingProgress flags={backendMl} />}
 
       {error && <div className="status err">{error}</div>}
 

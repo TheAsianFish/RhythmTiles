@@ -380,3 +380,53 @@ canvas {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Loading-progress block shown inside the menu while a chart fetch is in
+   flight. Stays out of the way of the Start button so the user can still
+   Cancel if they change their mind mid-generation. */
+.loading-progress {
+  background: rgba(95, 192, 255, 0.08);
+  border: 1px solid rgba(95, 192, 255, 0.28);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: #cfe9ff;
+  line-height: 1.4;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* When Demucs is the active stage, color the panel amber so the player
+   knows this is the long step (and not just a transient hang). */
+.loading-progress-warn {
+  background: rgba(255, 192, 80, 0.08);
+  border-color: rgba(255, 192, 80, 0.4);
+  color: #ffe1a8;
+}
+
+.loading-progress-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.loading-progress-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.loading-progress-stage {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.loading-progress-hint {
+  opacity: 0.8;
+}
+
+.loading-progress-eta {
+  font-size: 10px;
+  opacity: 0.55;
+}
