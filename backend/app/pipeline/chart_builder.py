@@ -23,6 +23,7 @@ from app.models import (
 )
 from app.pipeline.beat_track import detect_beats
 from app.pipeline.difficulty import shape_difficulty
+from app.pipeline.hold_detect import detect_holds
 from app.pipeline.lane_assign import assign_lanes
 from app.pipeline.onset_detect import detect_onsets
 
@@ -79,8 +80,18 @@ def build_chart_from_audio(
 
     beat_info = detect_beats(y=y, sr=sr)
     onsets = detect_onsets(y=y, sr=sr)
-    raw_notes = assign_lanes(onsets=onsets, y=y, sr=sr)
-    notes = shape_difficulty(notes=raw_notes, difficulty=difficulty, beats=beat_info.beats)
+    beat_period_s: float | None = None
+    if beat_info.bpm and beat_info.bpm > 0:
+        beat_period_s = 60.0 / beat_info.bpm
+    raw_notes = assign_lanes(onsets=onsets, y=y, sr=sr, beat_period_s=beat_period_s)
+    thinned = shape_difficulty(notes=raw_notes, difficulty=difficulty, beats=beat_info.beats)
+    notes = detect_holds(
+        notes=thinned,
+        y=y,
+        sr=sr,
+        beat_period_s=beat_period_s,
+        beats_s=beat_info.beats,
+    )
 
     return Chart(
         audio=AudioMeta(

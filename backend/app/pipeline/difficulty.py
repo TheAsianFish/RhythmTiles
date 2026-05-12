@@ -61,6 +61,14 @@ def shape_difficulty(
     last_lane = -1
     for n in notes:
         gap = n.t - last_t
+        # Chord partner: same-t note as the previously kept one. Always keep
+        # so the pair survives thinning. Lane assigner only emits chords with
+        # distinct lanes so we don't need to re-check that here.
+        if last_t > -1e8 and abs(gap) < 1e-6 and n.lane != last_lane:
+            kept.append(n)
+            # last_t stays at the chord's onset time so the next non-chord
+            # note still needs to clear min_gap from the chord.
+            continue
         if gap >= min_gap:
             kept.append(n)
             last_t = n.t
