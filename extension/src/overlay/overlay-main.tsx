@@ -206,11 +206,26 @@ function App() {
           break;
         case "BB_VIDEO_SEEKED": {
           const seekTime = m.currentTime as number;
-          // currentTime is a getter now (interpolating); rebase the clock
-          // via set() so the next read returns the seeked time exactly.
-          clockRef.current.set(seekTime, clockRef.current.paused);
+          const wasPlaying = !!m.wasPlaying;
+          // Rebase the clock and the in-game note cursor at the new position
+          // BEFORE deciding whether to run a countdown, so the countdown runs
+          // against the post-seek state.
+          clockRef.current.set(seekTime, !wasPlaying);
           loopRef.current?.seekToVideoTime(seekTime);
           rendererRef.current?.resetAnim();
+          // Any in-flight countdown is now stale (its target time is wrong).
+          cancelCountdown();
+          // A seek while playing always re-runs the countdown. Pause-state
+          // seeks just update position; the user will get a countdown on
+          // next unpause via the existing mid-song-resume path.
+          if (wasPlaying) {
+            // Mark "everPlayed" so the resume after the countdown's internal
+            // play() does not get treated as the first start (which would
+            // skip the countdown). scheduleCountdown handles the pause +
+            // 3-2-1 + resume sequence end-to-end.
+            everPlayedRef.current = true;
+            scheduleCountdown();
+          }
           break;
         }
         case "BB_KEY_DOWN":

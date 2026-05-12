@@ -368,11 +368,22 @@ async function startGame(difficulty: Difficulty) {
   detachVideoListeners();
   const onPause = () => iframe.contentWindow?.postMessage({ type: "BB_VIDEO_PAUSED" }, "*");
   const onPlay = () => iframe.contentWindow?.postMessage({ type: "BB_VIDEO_PLAYING" }, "*");
-  const onSeek = () =>
+  const onSeek = () => {
+    const v = videoEl;
+    if (!v) return;
+    // wasPlaying tells the overlay whether to trigger a countdown after the
+    // seek. Scrubbing while playing -> pause, 3-2-1, resume from new pos.
+    // Scrubbing while paused -> just update position; the countdown will
+    // run when the user hits play, via the existing mid-song-resume path.
     iframe.contentWindow?.postMessage(
-      { type: "BB_VIDEO_SEEKED", currentTime: videoEl?.currentTime ?? 0 },
+      {
+        type: "BB_VIDEO_SEEKED",
+        currentTime: v.currentTime,
+        wasPlaying: !v.paused && !v.ended,
+      },
       "*",
     );
+  };
   videoEl.addEventListener("pause", onPause);
   videoEl.addEventListener("play", onPlay);
   videoEl.addEventListener("seeked", onSeek);
