@@ -2,6 +2,119 @@
 
 Append-only log of decisions that shape the project. Each entry records the date, the question, the choice, and why.
 
+## 2026-05-12: Demucs activated + per-stem onset cache
+
+**Question:** Demucs has been scaffolded for a while behind `USE_DEMUCS`.
+Once we flip it on for real, two things have to be solved that the
+scaffold left open: (a) what happens when the same song is regenerated
+at multiple difficulties (Demucs cost is dominant — minutes on CPU),
+and (b) what to install / configure to actually use it.
+
+**Choice:**
+- Install path: `pip install -e ".[demucs]"` brings in demucs 4.0.1 +
+  htdemucs weights (~80MB, auto-downloaded on first inference). Now
+  documented as one of three supported modes in DEVELOPMENT.md
+  (Baseline / ML-light / ML-full).
+- **Per-stem onset cache** at `app/ml/onset_cache.py`: caches the
+  per-stem Onset list (the output of Demucs + onset detection) by
+  audio content hash. Difficulty selectivity runs downstream of onset
+  detection so the cache hit is difficulty-independent — easy /
+  normal / hard / expert on the same song all pay Demucs once.
+- Cache layout mirrors `beat_cache.py`: small JSON file per audio
+  under `<CACHE_DIR>/onsets/`, versioned, silent on read/write
+  errors so a corrupt cache never breaks chart generation.
+
+**Why:** without the cache, a player who replays a song at a higher
+difficulty waits 2-4 minutes for Demucs to run again on the exact
+same audio, producing identical stems and identical onsets. That
+break in the chart-cache-hits-are-instant guarantee would be a
+worse UX than just shipping the heuristic pipeline.
+
+**Revisit when:** GPU deploy lands (Modal / Replicate) — Demucs is
+~3x realtime on GPU vs 0.25x on CPU, which might let us drop the
+per-stem cache in favour of always-recompute. Probably not worth it
+even then; the cache is tiny.
+
+## 2026-05-12: Beat This! downbeat sanity filter
+
+**Question:** Beat This! 1.1.0 sometimes returns a downbeat for
+nearly every beat on out-of-distribution audio (regular click tracks,
+drones, very repetitive synth music). On a 21-beat synth click track
+during smoke testing, Beat This! reported 18 downbeats. Our
+downbeat-accent rule fires a chord on every onset near a downbeat,
+so the resulting chart had a 100% chord rate.
+
+**Choice:** Added `_sanity_filter_downbeats` to `beat_track.py`. When
+the downbeats-to-beats ratio exceeds `_MAX_PLAUSIBLE_DOWNBEAT_RATIO`
+(0.55), the downbeat list is discarded and the lane assigner falls
+back to the strength+centroid accent gate.
+
+**Why:** 0.55 is above every legitimate time signature (4/4 = 0.25,
+3/4 = 0.33, 2/4 = 0.50, 6/8 = 0.17). A ratio above means the model
+is fooling itself, and trusting it would produce charts that are
+gameplay-broken. The fallback is the gate that shipped before
+downbeats existed; it produces playable charts with a ~7% chord
+rate, which is the right behaviour.
+
+**Revisit when:** Beat This! ships a more robust downbeat head, or
+when we add a different out-of-distribution detector (e.g. low
+inference confidence).
+
+## 2026-05-12: ML Phase 1 (Beat This!) and Phase 2 (per-stem onsets) implemented
+
+**Question:** Which ML modules from docs/ML_PLAN.md land first, and how
+do they integrate with the heuristic pipeline that already ships?
+
+**Choice:**
+
+- **Beat This!** detector wired into `app/pipeline/beat_track.py` behind
+  a `USE_BEAT_THIS=1` env flag. Returns beats AND downbeats AND a derived
+  piecewise bpm curve. Falls back to librosa on any failure (package
+  missing, inference error, no beats found). Beat-tracker output is
+  cached on disk per audio content hash so re-runs at different
+  difficulties pay zero ML cost.
+- **Downbeat-aware accent chords.** When the Beat This! path produces
+  downbeats, the lane assigner emits chord stacks on real bar starts
+  rather than guessing accents from strength quantile + centroid. The
+  strength+centroid gate stays in for the librosa fallback path and for
+  accents that happen between bars.
+- **Per-stem onset detection.** `detect_onsets_per_stem` runs energy-
+  envelope onset detection on the drum stem and vocal stem separately
+  and tags each Onset with its source. The lane assigner routes drums
+  to the LOW band (lanes 0/1) and vocals to the HIGH band (lanes 2/3),
+  overriding the centroid split when a stem label is present. Activated
+  by `USE_DEMUCS=1`; falls back to full-mix detection on the same audio
+  when Demucs isn't installed.
+- **bpmCurve in the Chart JSON.** Always populated when there are
+  enough beats; consumed by no game logic today but exposed in the
+  wire contract so the HUD can read tempo shifts later without a
+  schema change.
+
+**Why:**
+- ML_PLAN's "honest reframe" research called Beat This! the single
+  biggest "hand-mapped feel" jump available because every downstream
+  decision (snap-to-beat, subdivisions, density bucketing, chord
+  emission) compounds on beat-grid quality.
+- The plan calls for each phase to be flag-gated with a heuristic
+  rollback. Both new paths follow the existing Demucs scaffold pattern:
+  try ML, log on failure, return the heuristic result.
+- Per-stem onset detection is the unlock that makes "drums route to
+  lanes 0/1, vocals route to lanes 2/3" deterministic instead of
+  relying on the centroid being a clean proxy for instrument. On songs
+  where the vocal sits below 2 kHz this is the difference between a
+  chart that follows the melody and one that doesn't.
+
+**Test coverage:** `tests/test_ml_phases.py` asserts the fallback paths
+work without the ML packages installed, the cache round-trips, the
+downbeat chord rule fires regardless of centroid, and stem labels route
+to the expected band. Existing 53 tests still pass.
+
+**Revisit when:** Phase 3 (MERT section detection) is implemented, or
+when playtesting shows the strength/centroid accent gate is still firing
+unwanted chords on librosa-fallback songs (would suggest tightening
+CHORD_STRENGTH_QUANTILE per-difficulty further).
+
+
 ## 2026-05-11: YouTube seek and pause behavior in the overlay loop
 
 **Question:** What happens when the user pauses the video or scrubs the timeline?

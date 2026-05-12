@@ -7,10 +7,41 @@ heuristic baseline.
 
 ## Status
 
-Not started. Stubs exist at `backend/app/ml/`. The heuristic pipeline
-under `backend/app/pipeline/` remains the production path. Research
-pass on current music ML models is captured below; concrete model
-choices are recommended per phase.
+Phase 1 (Beat This!) and Phase 2 (Demucs + per-stem onsets) are both
+ACTIVE behind their respective env flags. The heuristic pipeline
+remains the production default; ML is opt-in per request via
+`USE_BEAT_THIS=1` and `USE_DEMUCS=1`. Both flags fall back to librosa
++ full-mix on package or runtime failure.
+
+  - `app/ml/beat_this.py` wraps the Beat This! detector behind the
+    same BeatInfo interface as librosa, plus a downbeat list and a
+    derived bpmCurve. Beat This! has a known failure mode on
+    out-of-distribution audio (regular click tracks, drones) where
+    it flags nearly every beat as a downbeat. A sanity filter in
+    `_detect_with_beat_this` drops the downbeat list when the
+    downbeat/beat ratio exceeds 0.55 (above every plausible time
+    signature; the lane assigner falls back to strength/centroid
+    accents when this happens).
+  - `app/ml/beat_cache.py` persists beat-tracker output keyed by
+    audio content hash so regeneration at multiple difficulties
+    doesn't re-run the model.
+  - `app/ml/onset_cache.py` persists per-stem onset lists by audio
+    content hash. Demucs is the slowest stage by an order of
+    magnitude; this cache makes its cost a one-time-per-song
+    payment rather than once-per-difficulty.
+  - `app/pipeline/stems.py` activates Demucs htdemucs separation
+    when `USE_DEMUCS=1`. Falls through to a pass-through Stems
+    object otherwise.
+  - `app/pipeline/onset_detect.py` exposes `detect_onsets_per_stem`
+    that tags each onset with `stem="drums"` / `"vocals"`.
+  - `app/pipeline/lane_assign.py` routes by stem when available
+    (drums -> low band, vocals -> high band) and emits chord stacks
+    on real downbeats regardless of strength/centroid.
+  - `app/tools/bench_ml_phase.py` runs the ML_PLAN validation gates
+    against any WAV with `--baseline-only`, `--beat-this`, or
+    `--demucs` flags.
+
+Phase 3 (MERT for section detection) is still architectural-only.
 
 ## Honest reframe from research
 

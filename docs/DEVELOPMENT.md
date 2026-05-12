@@ -31,8 +31,34 @@ Env vars (see `backend/.env.example`):
 
 - `BACKEND_HOST`, `BACKEND_PORT`
 - `BACKEND_ALLOW_YTDLP` (1 to enable yt-dlp ingest path; off by default)
-- `USE_DEMUCS` (1 to enable source separation; off by default, slow on CPU)
-- `CACHE_DIR` (where SQLite + temp audio live; defaults to `backend/cache`)
+- `USE_DEMUCS` (1 to enable source separation; off by default, slow on CPU).
+  When on, per-stem onset detection runs (drums + vocals tagged onsets).
+  Requires `pip install '.[demucs]'`. First run downloads ~80MB of model
+  weights; per-song generation goes from ~10s to several minutes on CPU.
+- `USE_BEAT_THIS` (1 to enable CPJKU Beat This! beat + downbeat detector;
+  off by default. `pip install '.[ml]'` to install the optional deps).
+- `CACHE_DIR` (where SQLite + temp audio live; defaults to `backend/cache`).
+  Beat-tracker output is cached under `<CACHE_DIR>/beats/`. Per-stem onset
+  lists are cached under `<CACHE_DIR>/onsets/` so re-generating the same
+  song at a different difficulty doesn't re-run Demucs.
+
+## Three modes
+
+The pipeline supports three modes, toggled entirely by env vars. The
+default (everything off) is the librosa heuristic that shipped before
+any ML landed. All flag combinations gracefully fall back if their
+package isn't installed, so a misconfig never breaks chart generation.
+
+| Mode | Flags | Install | First-song cost (CPU) |
+|---|---|---|---|
+| Baseline | (all off) | `pip install -e ".[dev]"` | ~10s |
+| ML-light | `USE_BEAT_THIS=1` | `pip install -e ".[ml]"` | ~15-20s |
+| ML-full | `USE_BEAT_THIS=1` + `USE_DEMUCS=1` | `pip install -e ".[ml,demucs]"` | 2-5 min |
+
+After the first chart per song, the chart cache returns it instantly
+on replay. Per-stem onsets and Beat This! beats are cached separately
+by audio content hash, so re-generating at a different difficulty
+doesn't re-pay the ML cost.
 
 ## Extension
 
