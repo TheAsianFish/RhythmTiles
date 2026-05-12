@@ -15,6 +15,9 @@ def isolated_cache_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     # Disable yt-dlp in tests regardless of the host shell's env.
     monkeypatch.setenv("BACKEND_ALLOW_YTDLP", "0")
     monkeypatch.setenv("USE_DEMUCS", "0")
+    # Default tests to the heuristic beat tracker. ML phase tests opt in
+    # explicitly via their own monkeypatch.setenv.
+    monkeypatch.setenv("USE_BEAT_THIS", "0")
 
     import importlib
 
@@ -26,6 +29,14 @@ def isolated_cache_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     importlib.reload(cache)
     import app.audio.ingest as ingest
     importlib.reload(ingest)
+    import app.ml.beat_cache as beat_cache
+    importlib.reload(beat_cache)
+    import app.ml.onset_cache as onset_cache
+    importlib.reload(onset_cache)
+    import app.pipeline.beat_track as beat_track
+    importlib.reload(beat_track)
+    import app.pipeline.chart_builder as chart_builder
+    importlib.reload(chart_builder)
     import app.routes.charts as charts
     importlib.reload(charts)
     yield
