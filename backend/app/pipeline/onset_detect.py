@@ -185,6 +185,11 @@ def snap_onsets_to_beats(
     t=1.000s, snapping to the beat aligns the note with where the player
     feels the beat rather than where the spectrum peaks.
 
+    Collision avoidance: if snapping two onsets would put them at the same
+    beat, only the CLOSER one snaps and the second is left at its original
+    time. Otherwise the snap manufactures fake chord stacks from genuinely
+    sequential events that just happened to both be near the same beat.
+
     Onsets outside the tolerance are left alone so off-beat events stay
     off-beat. Mutates onset objects in place AND returns a sorted list.
     """
@@ -192,17 +197,35 @@ def snap_onsets_to_beats(
         return onsets
     sorted_beats = sorted(beats)
     nb = len(sorted_beats)
-    # Two-pointer walk: onsets are time-sorted so we can advance the beat
-    # cursor monotonically.
+    # Track which beat times we've already snapped an onset to so a second
+    # near-beat onset doesn't collide with it.
+    snapped_to: set[float] = set()
     j = 0
-    for o in onsets:
+    # We need stable iteration in time order and a way to compare candidate
+    # distances, so do two passes: first find each onset's snap candidate,
+    # then resolve collisions (winner is the onset closer to the beat).
+    candidates: list[tuple[int, float, float]] = []  # (idx, target_beat, distance)
+    for idx, o in enumerate(onsets):
         while j + 1 < nb and sorted_beats[j + 1] <= o.t:
             j += 1
-        # The nearest beat is either sorted_beats[j] or sorted_beats[j+1].
         best_beat = sorted_beats[j]
         if j + 1 < nb and abs(sorted_beats[j + 1] - o.t) < abs(best_beat - o.t):
             best_beat = sorted_beats[j + 1]
-        if abs(best_beat - o.t) <= snap_tolerance_s:
-            o.t = float(best_beat)
+        dist = abs(best_beat - o.t)
+        if dist <= snap_tolerance_s:
+            candidates.append((idx, float(best_beat), dist))
+
+    # Resolve per beat: closest onset wins the snap; others stay put.
+    candidates.sort(key=lambda c: c[2])  # smallest distance first
+    snap_for_idx: dict[int, float] = {}
+    for idx, beat_t, _dist in candidates:
+        if beat_t in snapped_to:
+            continue
+        snap_for_idx[idx] = beat_t
+        snapped_to.add(beat_t)
+
+    for idx, beat_t in snap_for_idx.items():
+        onsets[idx].t = beat_t
+
     onsets.sort(key=lambda o: o.t)
     return onsets

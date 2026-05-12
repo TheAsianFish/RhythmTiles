@@ -168,23 +168,22 @@ def test_shape_difficulty_preserves_chord_partners() -> None:
     assert len(same_t) == 2, f"chord partner was dropped (shaped times around chord: {times[:5]})"
 
 
-def test_assign_lanes_emits_chord_on_strong_onset() -> None:
-    # Build a stream where one onset is much stronger than the rest. Even with
-    # only 24 onsets (the minimum), the top-quantile one should yield a chord.
+def test_assign_lanes_single_note_for_loud_single_onset() -> None:
+    # Strong single onset should produce ONE note, not a chord stack. The
+    # strength-based chord emission was wrong musically (a loud kick is one
+    # note, not a chord) so we removed it. Real chords now come only from
+    # the centroid-aware onset merge keeping distinct-pitch near-
+    # simultaneous events.
     onsets: list[Onset] = []
     for i in range(40):
         onsets.append(
             Onset(t=0.25 * i, strength=0.2, centroid_hz=200.0 if i % 2 == 0 else 4000.0),
         )
-    # Make onset index 20 the strongest (top quantile).
     onsets[20] = Onset(t=0.25 * 20, strength=1.0, centroid_hz=2000.0)
     notes = assign_lanes(onsets=onsets, y=None, sr=22050)  # type: ignore[arg-type]
-    # Find two notes at t == 5.0 (20 * 0.25) -> chord
-    chord_partners = [n for n in notes if abs(n.t - 5.0) < 1e-6]
-    assert len(chord_partners) == 2, f"expected chord at t=5.0, got {chord_partners}"
-    # One lane must be from the low band, the other from the high band.
-    lanes = sorted(n.lane for n in chord_partners)
-    assert lanes[0] in (0, 1) and lanes[1] in (2, 3)
+    # The strongest onset at t=5.0 must become a SINGLE note now.
+    at_strong_t = [n for n in notes if abs(n.t - 5.0) < 1e-6]
+    assert len(at_strong_t) == 1, f"strong onset should be single note: {at_strong_t}"
 
 
 def test_hold_detect_returns_taps_when_audio_is_short_silence() -> None:
@@ -395,6 +394,25 @@ def test_shape_difficulty_uniform_when_no_buckets() -> None:
         notes=notes, difficulty="easy", beats=beats, energy_buckets=[1] * 60,
     )
     assert [n.t for n in without_buckets] == [n.t for n in with_uniform_buckets]
+
+
+def test_snap_onsets_does_not_collide_two_onsets_on_same_beat() -> None:
+    from app.pipeline.onset_detect import Onset, snap_onsets_to_beats
+
+    # Two near-simultaneous onsets, both within snap tolerance of beat 1.0.
+    # Only the closer one should snap; the other stays put so we don't
+    # manufacture a fake chord stack from sequential events.
+    beats = [0.0, 1.0, 2.0]
+    onsets = [
+        Onset(t=0.992, strength=1.0, centroid_hz=500),  # 8ms before beat
+        Onset(t=1.015, strength=0.9, centroid_hz=2500),  # 15ms after beat
+    ]
+    out = snap_onsets_to_beats(onsets, beats, snap_tolerance_s=0.025)
+    times = sorted(o.t for o in out)
+    # Closer one (0.992, distance 8ms) wins the snap to 1.0; the other
+    # (1.015, distance 15ms) is left at its original time.
+    assert times[0] == 1.0
+    assert times[1] == 1.015, f"second onset should not also snap to 1.0: {times}"
 
 
 def test_snap_onsets_to_beats_pulls_close_onsets() -> None:

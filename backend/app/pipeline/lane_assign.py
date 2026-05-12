@@ -94,7 +94,14 @@ def assign_lanes(
     if cutoff <= 0 or len(onsets) < 8:
         cutoff = FALLBACK_CUTOFF_HZ
 
-    chord_threshold = _chord_threshold(onsets, quantile=chord_quantile)
+    # `chord_threshold` is kept (still computed) but no longer triggers a
+    # forced 2-note emission from a single onset. Real chord stacks now
+    # come only from the centroid-aware onset merge keeping two
+    # distinct-pitch events at the same instant. Strength-based chord
+    # generation was mapping single loud events (kicks, snares, piano
+    # melodic notes) as fake chords, which produced the "I'm just always
+    # pressing two keys" feel.
+    _ = _chord_threshold(onsets, quantile=chord_quantile)  # reserved for future use
     stream_gap_s = (beat_period_s * 0.5) if beat_period_s else DEFAULT_STREAM_GAP_S
 
     notes: list[RawNote] = []
@@ -109,27 +116,6 @@ def assign_lanes(
         low = onset.centroid_hz < cutoff
         t_rounded = round(float(onset.t), 4)
         in_stream = (onset.t - prev_t) < stream_gap_s
-
-        # Try chord first when strong enough and both bands have capacity.
-        if onset.strength >= chord_threshold:
-            low_pick = _pick_band(0, 1, low_toggle, last_hit, onset.t)
-            high_pick = _pick_band(2, 3, high_toggle, last_hit, onset.t)
-            if low_pick is not None and high_pick is not None:
-                low_lane, low_used_preferred = low_pick
-                high_lane, high_used_preferred = high_pick
-                notes.append(RawNote(t=t_rounded, lane=low_lane, type="tap", strength=float(onset.strength)))
-                notes.append(RawNote(t=t_rounded, lane=high_lane, type="tap", strength=float(onset.strength)))
-                last_hit[low_lane] = onset.t
-                last_hit[high_lane] = onset.t
-                if low_used_preferred:
-                    low_toggle = 1 - low_toggle
-                if high_used_preferred:
-                    high_toggle = 1 - high_toggle
-                # Chord uses both hands; reset streak.
-                same_hand_streak = 0
-                last_hand = -1
-                prev_t = onset.t
-                continue
 
         # Hand-balance: during a stream, if the natural band would make 3+
         # same-hand notes in a row, try the other band first.
