@@ -6,15 +6,21 @@
 //  - inject the overlay iframe and post the chart to it
 //  - keep the overlay's clock fed from the page's <video>.currentTime
 
-import { generateChart, BackendError } from "@/api/backend-client";
+import { generateChart, BackendError, isPlaceholderChart } from "@/api/backend-client";
 import type { Chart, Difficulty } from "@/types/chart";
+import { loadSettings } from "@/utils/storage";
 
 const OVERLAY_ID = "beatbridge-overlay-root";
 const CLOCK_TICK_MS = 16;
 
 // Panel geometry. Sits on the right side of the YouTube viewport, descending
-// from below the top nav bar so the video stays unobstructed.
-const PANEL_WIDTH = 360;
+// from below the top nav bar so the video stays unobstructed. Width and max
+// height are capped so the panel reads as a floating widget rather than a
+// full-screen takeover. At 620px height the renderer still has ~800ms of
+// note travel which is plenty of lead time for any song.
+const PANEL_WIDTH = 320;
+const PANEL_MAX_HEIGHT = 620;
+const PANEL_MIN_HEIGHT = 420;
 const PANEL_MARGIN_RIGHT = 24;
 const PANEL_MARGIN_TOP = 72;
 const PANEL_MARGIN_BOTTOM = 24;
@@ -22,6 +28,19 @@ const PANEL_MARGIN_BOTTOM = 24;
 let overlay: HTMLIFrameElement | null = null;
 let clockInterval: number | null = null;
 let videoEl: HTMLVideoElement | null = null;
+// Track listeners we attach to the <video> element so successive Start Game
+// presses don't pile duplicates onto the same element.
+let videoListeners: Array<{ type: string; fn: EventListener }> = [];
+
+// Lane bindings snapshot taken on startGame. Used to decide which keys to
+// intercept at the document level before YouTube's player gets them.
+let boundCodes: Set<string> = new Set();
+// Codes currently held, for repeat-key dedup at the page level. Independent
+// from the iframe's InputCapture pressed-set because the iframe only ever
+// sees the deduplicated stream.
+const pageHeldCodes = new Set<string>();
+let keyDownHandler: ((ev: KeyboardEvent) => void) | null = null;
+let keyUpHandler: ((ev: KeyboardEvent) => void) | null = null;
 
 function findVideoElement(): HTMLVideoElement | null {
   const v = document.querySelector("video.html5-main-video") as HTMLVideoElement | null;
@@ -45,7 +64,8 @@ function ensureOverlay(): HTMLIFrameElement {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const left = Math.max(8, vw - PANEL_WIDTH - PANEL_MARGIN_RIGHT);
-  const height = Math.max(360, vh - PANEL_MARGIN_TOP - PANEL_MARGIN_BOTTOM);
+  const available = vh - PANEL_MARGIN_TOP - PANEL_MARGIN_BOTTOM;
+  const height = Math.max(PANEL_MIN_HEIGHT, Math.min(PANEL_MAX_HEIGHT, available));
   Object.assign(overlay.style, {
     position: "fixed",
     top: `${PANEL_MARGIN_TOP}px`,
@@ -80,6 +100,72 @@ function moveOverlayBy(dx: number, dy: number): void {
   overlay.style.bottom = "auto";
 }
 
+function detachVideoListeners() {
+  if (!videoEl) {
+    videoListeners = [];
+    return;
+  }
+  for (const { type, fn } of videoListeners) videoEl.removeEventListener(type, fn);
+  videoListeners = [];
+}
+
+// Install document-level keydown/keyup capture so YouTube's own shortcuts
+// (k = pause, j/l = seek 10s, etc.) cannot fire when the player presses a
+// lane-bound key. Events are forwarded to the overlay iframe via postMessage
+// so the game receives them regardless of which window has focus.
+function attachKeyCapture() {
+  if (keyDownHandler) return;
+  keyDownHandler = (ev: KeyboardEvent) => {
+    if (!boundCodes.has(ev.code)) return;
+    if (isTypingInEditable(ev.target)) return; // let users type into inputs normally
+    // stopImmediatePropagation prevents any other listeners on the same
+    // target (including YouTube's player shortcuts) from running. capture:
+    // true ensures we fire before bubble-phase listeners.
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    if (ev.repeat || pageHeldCodes.has(ev.code)) return;
+    pageHeldCodes.add(ev.code);
+    overlay?.contentWindow?.postMessage(
+      { type: "BB_KEY_DOWN", code: ev.code, perfMs: performance.now() },
+      "*",
+    );
+  };
+  keyUpHandler = (ev: KeyboardEvent) => {
+    if (!boundCodes.has(ev.code)) return;
+    if (isTypingInEditable(ev.target)) return;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    if (!pageHeldCodes.has(ev.code)) return;
+    pageHeldCodes.delete(ev.code);
+    overlay?.contentWindow?.postMessage(
+      { type: "BB_KEY_UP", code: ev.code, perfMs: performance.now() },
+      "*",
+    );
+  };
+  window.addEventListener("keydown", keyDownHandler, { capture: true });
+  window.addEventListener("keyup", keyUpHandler, { capture: true });
+}
+
+function isTypingInEditable(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable === true;
+}
+
+function detachKeyCapture() {
+  if (keyDownHandler) {
+    window.removeEventListener("keydown", keyDownHandler, { capture: true } as any);
+    keyDownHandler = null;
+  }
+  if (keyUpHandler) {
+    window.removeEventListener("keyup", keyUpHandler, { capture: true } as any);
+    keyUpHandler = null;
+  }
+  pageHeldCodes.clear();
+  boundCodes = new Set();
+}
+
 function removeOverlay() {
   if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
   overlay = null;
@@ -87,6 +173,8 @@ function removeOverlay() {
     clearInterval(clockInterval);
     clockInterval = null;
   }
+  detachVideoListeners();
+  detachKeyCapture();
 }
 
 function startClockBridge() {
@@ -118,17 +206,33 @@ async function startGame(difficulty: Difficulty) {
   const duration = isFinite(videoEl.duration) ? videoEl.duration : undefined;
   console.log("[BeatBridge] resolved", { videoId, duration });
 
+  // Snapshot the current key bindings and install the keyboard interceptor
+  // before the chart request goes out, so even early presses are captured.
+  const settings = await loadSettings();
+  boundCodes = new Set(settings.bindings);
+  attachKeyCapture();
+
   let chart: Chart;
   try {
     chart = await generateChart({ videoId, difficulty, duration });
     console.log("[BeatBridge] chart loaded", {
       notes: chart.notes.length,
       bpm: chart.audio.bpm,
+      pipelineVersion: chart.metadata.pipelineVersion,
     });
   } catch (e) {
     const msg = e instanceof BackendError ? e.message : (e as Error).message;
     console.warn("[BeatBridge] chart generation failed:", msg);
     return { ok: false, error: `chart generation failed: ${msg}` };
+  }
+
+  if (isPlaceholderChart(chart)) {
+    const msg =
+      "Backend returned the 20-note demo chart. Real audio generation is " +
+      "disabled or failed. Restart the backend with BACKEND_ALLOW_YTDLP=1, " +
+      "or check the backend terminal for an error trace.";
+    console.warn("[BeatBridge]", msg);
+    return { ok: false, error: msg };
   }
 
   const iframe = ensureOverlay();
@@ -161,19 +265,24 @@ async function startGame(difficulty: Difficulty) {
   // The overlay's pre-React message buffer will catch it.
   const fallbackTimer = window.setTimeout(() => sendChart("1s-fallback"), 1000);
 
-  // Pause/resume game when the user scrubs or pauses the video.
-  videoEl.addEventListener("pause", () => {
-    iframe.contentWindow?.postMessage({ type: "BB_VIDEO_PAUSED" }, "*");
-  });
-  videoEl.addEventListener("play", () => {
-    iframe.contentWindow?.postMessage({ type: "BB_VIDEO_PLAYING" }, "*");
-  });
-  videoEl.addEventListener("seeked", () => {
+  // Pause/resume game when the user scrubs or pauses the video. Tracked in
+  // videoListeners so a subsequent Start Game (or close) can detach them.
+  detachVideoListeners();
+  const onPause = () => iframe.contentWindow?.postMessage({ type: "BB_VIDEO_PAUSED" }, "*");
+  const onPlay = () => iframe.contentWindow?.postMessage({ type: "BB_VIDEO_PLAYING" }, "*");
+  const onSeek = () =>
     iframe.contentWindow?.postMessage(
       { type: "BB_VIDEO_SEEKED", currentTime: videoEl?.currentTime ?? 0 },
       "*",
     );
-  });
+  videoEl.addEventListener("pause", onPause);
+  videoEl.addEventListener("play", onPlay);
+  videoEl.addEventListener("seeked", onSeek);
+  videoListeners = [
+    { type: "pause", fn: onPause },
+    { type: "play", fn: onPlay },
+    { type: "seeked", fn: onSeek },
+  ];
 
   startClockBridge();
   return { ok: true };
@@ -212,6 +321,17 @@ window.addEventListener("message", (ev) => {
       break;
     case "BB_DRAG_BY":
       moveOverlayBy(msg.dx as number, msg.dy as number);
+      break;
+    case "BB_REQUEST_VIDEO_PAUSE":
+      // Used by the overlay's pause-countdown sequence. videoEl.pause() will
+      // fire a 'pause' event which bounces back as BB_VIDEO_PAUSED; the
+      // overlay ignores that ricochet while inCountdown is true.
+      videoEl?.pause();
+      break;
+    case "BB_REQUEST_VIDEO_PLAY":
+      // The returned promise can reject if the browser rejects autoplay; we
+      // ignore that since the user has already interacted with the page.
+      void videoEl?.play().catch(() => {});
       break;
   }
 });

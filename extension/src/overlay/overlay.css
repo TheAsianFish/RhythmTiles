@@ -1,4 +1,8 @@
 html, body {
+  /* --panel-alpha is set by overlay-main from UserSettings.opacity. Each
+     rgba in the gradient is the base alpha multiplied by this scalar so the
+     panel becomes more or less translucent without changing its color. */
+  --panel-alpha: 1;
   margin: 0;
   padding: 0;
   width: 100%;
@@ -6,17 +10,15 @@ html, body {
   color: #f4f6f8;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   overflow: hidden;
-  /* Vertical translucent gradient so YouTube content stays readable behind us.
-     Darker at top (HUD text area), lighter at bottom (hit line + key labels). */
   background: linear-gradient(
     180deg,
-    rgba(10, 12, 16, 0.86) 0%,
-    rgba(13, 15, 20, 0.74) 45%,
-    rgba(15, 18, 24, 0.58) 100%
+    rgba(10, 12, 16, calc(0.86 * var(--panel-alpha))) 0%,
+    rgba(13, 15, 20, calc(0.74 * var(--panel-alpha))) 45%,
+    rgba(15, 18, 24, calc(0.58 * var(--panel-alpha))) 100%
   );
   border-radius: 14px;
   box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.55),
+    0 12px 40px rgba(0, 0, 0, calc(0.55 * var(--panel-alpha))),
     inset 0 0 0 1px rgba(255, 255, 255, 0.07);
 }
 
@@ -109,6 +111,29 @@ canvas {
   border-radius: 8px;
 }
 
+.countdown {
+  position: absolute;
+  /* Sit over the receptor area, ~62% down the panel. Matches what GH/RB
+     and most arcade rhythm games do. */
+  top: 58%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 88px;
+  font-weight: 800;
+  color: #ffffff;
+  text-shadow: 0 0 18px rgba(255, 215, 0, 0.85), 0 4px 14px rgba(0, 0, 0, 0.7);
+  z-index: 7;
+  pointer-events: none;
+  animation: countdown-pop 0.7s ease-out;
+}
+
+@keyframes countdown-pop {
+  0% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+  20% { opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 0.9; }
+}
+
 .results {
   position: absolute;
   inset: 32px 0 0 0;
@@ -130,6 +155,14 @@ canvas {
 .results h2 { margin: 0 0 10px; font-size: 16px; }
 .results .score { font-size: 30px; font-weight: 700; margin: 6px 0; }
 .results .row { font-size: 12px; color: #b8c3d3; }
+.results .new-best {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ffd700;
+  margin: 0 0 8px;
+}
 
 .results button {
   background: rgba(255, 255, 255, 0.08);

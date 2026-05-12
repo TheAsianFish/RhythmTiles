@@ -46,6 +46,23 @@ export class InputCapture {
     for (const fn of this.subscribers) fn(e);
   }
 
+  // Inject a key event from outside the DOM (e.g. forwarded by the content
+  // script when the parent page has focus). Dedups identically to the DOM
+  // path so a key held down only fires a single press.
+  injectKey(code: string, kind: "press" | "release", perfMs: number) {
+    const lane = this.laneFor(code);
+    if (lane === null) return;
+    if (kind === "press") {
+      if (this.pressed.has(lane)) return;
+      this.pressed.add(lane);
+      this.emit({ lane, kind: "press", perfMs });
+    } else {
+      if (!this.pressed.has(lane)) return;
+      this.pressed.delete(lane);
+      this.emit({ lane, kind: "release", perfMs });
+    }
+  }
+
   attach(target: Window | Document = window) {
     if (this.listener) return; // already attached
 
