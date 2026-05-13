@@ -47,6 +47,22 @@ Env vars (see `backend/.env.example`):
   key so re-generating the same song at a different difficulty doesn't
   re-pay any ML cost.
 
+Production-hardening env vars (introduced 2026-05-12 audit pass):
+
+- `MAX_CONCURRENT_CHARTS` (default `1`). How many chart-generate
+  requests can run the heavy pipeline simultaneously. Default 1 is
+  safe for any deploy because Demucs holds the torch lock; bump to
+  2-4 only on GPU boxes with confirmed memory headroom.
+- `CHART_QUEUE_TIMEOUT_S` (default `0`). How long a queued
+  chart-generate request waits before the route returns HTTP 429.
+  `0` means fail-fast - clients get a clear "busy" immediately
+  instead of hanging behind a multi-minute Demucs job. Raise to
+  30-60s on GPU deploys where the queue cycles fast.
+- `CACHE_MAX_AGE_DAYS` (default `30`). Files under `<CACHE_DIR>/
+  {audio,beats,onsets,sections}/` and SQLite chart rows older than
+  this are pruned on backend startup. Drop to 7 if disk is tight;
+  raise if cache hits are valuable longer.
+
 ## Four modes
 
 The pipeline supports four modes, toggled entirely by env vars. The

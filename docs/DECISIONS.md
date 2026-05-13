@@ -2,6 +2,148 @@
 
 Append-only log of decisions that shape the project. Each entry records the date, the question, the choice, and why.
 
+## 2026-05-13: Pro skin rewrite - uniform white, osu! minimal aesthetic
+
+**Question:** The Pro skin used a charcoal -> silver -> near-white
+linear gradient for both the popup body and the in-overlay menu card.
+Light text sat on top of the gradient, so the white end of the
+gradient produced unreadable white-on-white regions. The user said
+"some text is hard to read due to the light on light gradient. Make
+it uniform. Take inspiration from white skins in osu!"
+
+**Choice:** Replace the gradients with uniform near-white surfaces
+matching the osu! community's "minimal/white" skin conventions
+(Aesthetic HD, MSkin, Minimal). Two design principles drive the
+palette:
+- Cards are FLAT WHITE. Popup body, in-overlay menu card, results
+  card, calibration page all use `#f5f6f9` / `#ffffff` surfaces.
+- HUD stays DARK. The video-overlay panel sits over arbitrary YouTube
+  content where a white panel would lose contrast with the lane
+  notes. The gradient body stays charcoal.
+
+Implementation: split `--bb-skin-text` (card context, dark in Pro)
+from a new `--bb-skin-hud-text` (HUD context, stays light). All
+five skins set both vars; only Pro splits them. Single muted-slate
+accent `#5b6478` for the primary button + active calibration dot,
+grayscale everywhere else.
+
+Removed: the Pro-specific text-shadow / drop-shadow band-aids that
+were workarounds for the gradient's readability problem. They hurt
+legibility on the new flat surface.
+
+References for the aesthetic: [Aesthetic
+HD](https://osu.ppy.sh/community/forums/topics/189843),
+[MSkin](https://github.com/CWabbity/MSkin), and the
+[skinship minimal collection](https://compendium.skinship.xyz/?tagin=minimalistic).
+
+**Revisit when:** A future skin (e.g. a "paper" or "pastel" variant)
+needs a light card with a different accent. The two-text-context
+machinery generalizes.
+
+## 2026-05-13: Demucs API silent fall-back fixed
+
+**Question:** ML-full was producing charts identical to ML-light
+no matter what song. Per-stem onset detection never ran. The user
+reported "ML-full feels very similar to ML-light" - which turned
+out to be literally true: the runtime was silently downgrading.
+
+**Root cause:** `stems.py` imported `from demucs.api import
+Separator`, but `demucs.api` is a planned 4.1 submodule that never
+reached PyPI. `demucs 4.0.1` (the latest released version) doesn't
+have it. Every ML-full request raised ImportError, the existing
+graceful-fallback path in `separate_stems` substituted the
+un-separated mix, and the pipeline behaved like ML-light. The
+mode chip and `/healthz` both showed `♫◓ ML-full` because the env
+flags were set; the actual pipeline silently degraded.
+
+**Choice:** Rewrite `_run_demucs` to use the lower-level
+`demucs.pretrained.get_model` + `demucs.apply.apply_model` API
+that ships with 4.0.1. Same downloaded weights, same outputs,
+just the explicit two-step form. `model.sources` is iterated by
+name so a different model that reorders the stem outputs won't
+silently misroute drums to the vocals slot.
+
+**Why this slipped through tests:** the existing
+`test_stems_falls_back_gracefully_when_demucs_missing` deliberately
+allows the fallback path to succeed (it's testing the fallback
+itself). It never asserted that the separated branch produced
+genuinely different output from the fallback branch. A future
+test should A/B them on synthetic stereo audio with known
+instrument bleed and assert that the separated drums are
+quieter on vocal-only segments than the full mix is.
+
+**Revisit when:** demucs upstream actually ships `demucs.api`.
+Until then, the lower-level imports stay.
+
+## 2026-05-13: Mode-aware chart cache key
+
+**Question:** The chart cache was keyed by `(videoId/audioHash,
+difficulty)` only. A song generated under ML-light yesterday
+returned instantly when the user switched to ML-full and asked
+for the same song at the same difficulty - serving the wrong
+(stale-mode) chart. Combined with the Demucs API bug (above),
+this made it almost impossible to A/B modes on real songs: the
+"new" run was either silently degraded OR served the prior
+mode's cached output.
+
+**Choice:** Mode-aware cache key. `_cache_key(base)` in
+`routes/charts.py` appends a compact tag derived from
+`PIPELINE_VERSION` major.minor plus the three ML flags:
+`<base>|v0.2-bt1-dm1-mt0`. Each (song, mode, difficulty) now
+has its own cache row. The per-stage caches (beats, per-stem
+onsets, sections) were already mode-aware via their `source=`
+parameter so they were never the problem; only the final-chart
+SQLite cache crossed modes.
+
+Bumping `PIPELINE_VERSION` major.minor auto-invalidates the
+cache (the mode key changes). Patch-level bumps deliberately
+don't, so trivial backend fixes don't churn the cache.
+
+**Test:** `test_cache_does_not_cross_pollinate_between_ml_modes`
+in `test_charts_route.py` generates a chart under baseline flags,
+switches to ML-light, verifies the cache namespace is distinct
+between modes.
+
+**Revisit when:** A future ML phase adds another env flag the
+cache should be aware of. The compact tag is easy to extend.
+
+## 2026-05-12: Audit cleanup pass (HIGH + MEDIUM bug fixes)
+
+**Question:** What's left to fix before the codebase is ready
+for serious playtesting? A deep grep audit surfaced ~10 items
+across the backend and extension.
+
+**Choice:** Four batched rounds, each its own commit:
+- Round 1 (`8914379`): `generate-from-audio` accepts `expert`
+  (was 422-rejecting); loop boot race on rapid replay (added a
+  `cancelled` check immediately before `loop.start()`); stale
+  "Stage 1 stub" docstring; lane-color "1/3 inner pair" typo.
+- Round 2 (`3064f60`): bump `PIPELINE_VERSION` 0.1.0 -> 0.2.0
+  with history block; secondary cache lookup by audio
+  contentHash (was running the pipeline twice for the same
+  audio under different videoIds); `/healthz` test asserts
+  MERT flags; dead `laneWidthPx` field removed; `chartTimeoutRef`
+  cleared on `BB_NEW_VIDEO`; dropped the `void DEFAULT_HIT_WINDOWS`
+  suppressor.
+- Round 3 (`3d94307`): `validateChart()` runtime shape check on
+  `BB_LOAD_CHART` so malformed payloads surface an error banner
+  instead of crashing the GameLoop on first frame.
+- Round 4 (`13e13c5`): menu Start skips chart refetch when only
+  sliders changed (was forcing a 2-5 min Demucs rerun to change
+  the volume); popup key rebindings propagate to running game
+  via `chrome.storage.onChanged`; `refreshBackendMode` discards
+  stale ping responses via an in-flight token.
+
+**Why:** Each fix individually is small. As a batch they cover the
+last clearly-needed correctness work before the codebase enters
+"playtest + tune" mode where every change needs real-music
+validation.
+
+**Skipped intentionally:** per-frame gradient allocation in
+`canvas-renderer.ts` and the two-pass note loop. Would need real
+profiling to justify and risk visual regressions for marginal
+CPU savings on modern hardware.
+
 ## 2026-05-12: Production hardening - queue, audio cap, cache prune
 
 **Question:** The chart-generate endpoint had no concurrency control,

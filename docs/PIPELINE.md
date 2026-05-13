@@ -176,11 +176,12 @@ PASS/FAIL against the ML_PLAN gates. `--baseline-only` skips the ML run.
 | `librosa` | `librosa.feature.spectral_centroid` | per-frame spectral centroid for lane routing fallback |
 | `librosa` | `librosa.effects.hpss` | harmonic/percussive separation for the harmonic onset branch |
 | `librosa` | `librosa.feature.rms` | sustain energy for hold detection + section bucketing |
-| `demucs` | `demucs.api.Separator` | htdemucs source separation. ML-full path only. |
-| `torch` | (transitive) | inference runtime for both Beat This! and Demucs |
+| `demucs` | `demucs.pretrained.get_model` + `demucs.apply.apply_model` | htdemucs source separation. ML-full / ML-max only. (The high-level `demucs.api.Separator` wrapper is a planned 4.1 submodule that never reached PyPI; we use the lower-level API that ships with 4.0.1.) |
+| `transformers` | `AutoModel` + `AutoFeatureExtractor` | MERT-v1-95M loader for section detection. ML-max only. |
+| `torch` | (transitive) | inference runtime for Beat This!, Demucs, and MERT |
 
 The heuristic pipeline is what `pyproject.toml` installs by default. ML deps
-live behind `[ml]` and `[demucs]` extras.
+live behind `[ml]` (Beat This!), `[demucs]`, and `[mert]` extras.
 
 ## Where randomness could leak in (and doesn't)
 

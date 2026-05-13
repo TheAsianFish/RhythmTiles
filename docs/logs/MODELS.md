@@ -70,6 +70,26 @@ All four also need `$env:BACKEND_ALLOW_YTDLP = "1"` for the
 YouTube-fetch path; otherwise the backend returns a 20-note
 placeholder chart.
 
+## Watch out: ML-full was once silently degrading
+
+Between 2026-05-12 and 2026-05-13 there was a quiet bug where ML-full
+produced charts identical to ML-light no matter the song. Root cause:
+`from demucs.api import Separator` always raised ImportError because
+`demucs.api` is a planned 4.1 submodule that never reached PyPI; the
+graceful-fallback path in `stems.py` swallowed the import and ran
+the un-separated mix. Mode chip still showed `♫◓ ML-full` because the
+env flags were set.
+
+Fixed in commit `d96e1c4` by switching to the lower-level
+`demucs.pretrained.get_model` + `demucs.apply.apply_model` API that
+ships with `demucs 4.0.1`. If you see an old commit and wonder why
+ML-full and ML-light produce the same output, this is why.
+
+Combined with the chart-cache cross-pollination bug (also fixed
+that day in `6870484`), it was effectively impossible to A/B modes on
+real songs for the brief window the two bugs coexisted: even when
+Demucs ran, the cache served back a stale-mode chart.
+
 ## Mode chip in the overlay
 
 The overlay menu shows which mode the backend is in. Symbols:

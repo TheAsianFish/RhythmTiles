@@ -18,6 +18,14 @@ A pre-flight list to walk before each release. Skim this when prepping a tagged 
 - [ ] If shipping ML-full: verify Demucs weights download succeeds on
       a clean host (~80MB) and that subsequent generations use the
       per-stem onset cache (no Demucs re-run for repeat difficulties).
+- [ ] Production hardening: `MAX_CONCURRENT_CHARTS` + `CHART_QUEUE_TIMEOUT_S`
+      env vars set appropriately for the deploy target (CPU = 1 slot
+      fail-fast, GPU = 1-2 slots short queue). Upload audio > 8 min
+      rejects with 413. Audio cache prunes on startup.
+- [ ] Mode-aware cache verified: generate a song at baseline, switch to
+      ML-light by env flag, generate the same song + difficulty -
+      should produce a DIFFERENT chart (not cache-hit). The `_mode_key`
+      suffix on the cache key prevents cross-mode pollution.
 
 ## Extension
 
@@ -40,7 +48,13 @@ A pre-flight list to walk before each release. Skim this when prepping a tagged 
       resets, results card dismisses, countdown plays.
 - [ ] Open the in-overlay menu (`☰` button): difficulty switch + Start
       regenerates the chart in place. Mode chip shows the right symbol
-      (`≋` / `♫` / `♫◓`).
+      (`≋` baseline / `♫` ML-light / `♫◓` ML-full / `♫◓✦` ML-max).
+- [ ] Slider-only menu changes (sfxVolume, noteSpeed, opacity) close
+      the menu and resume WITHOUT a chart refetch (audit Round 4 fix).
+      Only difficulty changes trigger the multi-minute regenerate.
+- [ ] Try each of the four skins (Midnight / Aurora / Arcade / Ember /
+      Pro). Pro should show a flat off-white popup + flat white menu
+      card (no gradient), dark text, gray slate accent.
 - [ ] Let YouTube auto-advance to the next song: overlay stays open,
       menu auto-opens with the previous difficulty pre-selected.
 - [ ] Toggle backend URL via `VITE_BACKEND_URL` and rebuild to confirm prod target.
