@@ -82,42 +82,55 @@ def _run_demucs(
     sr: int,
     model_name: str,
 ) -> Stems:
-    """Run real Demucs separation. Raises ImportError when demucs is missing."""
+    """Run real Demucs separation. Raises ImportError when demucs is missing.
+
+    Uses the lower-level `demucs.pretrained.get_model` + `demucs.apply.apply_model`
+    API that ships with demucs 4.0.1 (the high-level `demucs.api.Separator`
+    wrapper was a planned 4.1 feature that never reached PyPI). Functionally
+    equivalent; just more explicit about the model load + apply steps.
+    """
     import numpy as np  # noqa: WPS433
     import torch  # noqa: WPS433  pyright: ignore[reportMissingImports]
-    from demucs.api import Separator  # noqa: WPS433  pyright: ignore[reportMissingImports]
+    from demucs.apply import apply_model  # noqa: WPS433  pyright: ignore[reportMissingImports]
+    from demucs.pretrained import get_model  # noqa: WPS433  pyright: ignore[reportMissingImports]
 
-    # Demucs wants stereo input shaped [channels=2, samples]. We feed it
-    # twice-the-mono so the model sees both channels identically. Returning
-    # to mono after separation by averaging the stereo output.
-    stereo = np.stack([y, y]).astype(np.float32)
-    tensor = torch.from_numpy(stereo)
+    model = get_model(model_name)
+    model.eval()
+    target_sr = int(model.samplerate)
 
-    sep = Separator(model=model_name, segment=None)
-    if sr != sep.samplerate:
-        # Demucs expects the model's native sample rate (usually 44100).
-        # Resample with librosa so we don't introduce a separate dep.
+    # Demucs expects stereo at the model's native sample rate (44100 for
+    # htdemucs). We feed the mono signal duplicated to both channels.
+    if sr != target_sr:
         import librosa  # noqa: WPS433
-        resampled = librosa.resample(y, orig_sr=sr, target_sr=sep.samplerate)
-        stereo = np.stack([resampled, resampled]).astype(np.float32)
-        tensor = torch.from_numpy(stereo)
+        y_at_target = librosa.resample(y, orig_sr=sr, target_sr=target_sr)
+    else:
+        y_at_target = y
+    stereo = np.stack([y_at_target, y_at_target]).astype(np.float32)
+    # apply_model wants shape (batch=1, channels=2, samples).
+    tensor = torch.from_numpy(stereo).unsqueeze(0)
 
-    _origin, separated = sep.separate_tensor(tensor)
-    # separated maps name -> Tensor shape (channels, samples). Average back to
-    # mono and resample back to the caller's sr.
-    out: dict[str, np.ndarray] = {}
-    for name, t in separated.items():
-        mono = t.mean(dim=0).numpy().astype(np.float32)
-        if sr != sep.samplerate:
+    with torch.no_grad():
+        # `sources` shape: (batch, n_sources, channels, samples)
+        sources = apply_model(model, tensor, device="cpu", progress=False)
+    sources_np = sources[0].cpu().numpy().astype(np.float32)
+    # Average channels back to mono per source.
+    mono_sources = sources_np.mean(axis=1)
+
+    # model.sources is the ordered list of source names (drums, bass, other, vocals
+    # for htdemucs). Map by name so a different model that reorders won't silently
+    # mis-route.
+    name_to_signal: dict[str, np.ndarray] = {}
+    for name, signal in zip(model.sources, mono_sources):
+        if sr != target_sr:
             import librosa  # noqa: WPS433
-            mono = librosa.resample(mono, orig_sr=sep.samplerate, target_sr=sr)
-        out[name] = mono
+            signal = librosa.resample(signal, orig_sr=target_sr, target_sr=sr)
+        name_to_signal[name] = signal.astype(np.float32)
 
     return Stems(
-        drums=out.get("drums", y),
-        vocals=out.get("vocals", y),
-        bass=out.get("bass", y),
-        other=out.get("other", y),
+        drums=name_to_signal.get("drums", y),
+        vocals=name_to_signal.get("vocals", y),
+        bass=name_to_signal.get("bass", y),
+        other=name_to_signal.get("other", y),
         sr=sr,
         separated=True,
     )
