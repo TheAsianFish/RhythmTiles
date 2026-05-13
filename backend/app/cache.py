@@ -64,3 +64,22 @@ class ChartCache:
         with self._lock:
             self._conn.execute("DELETE FROM chart_cache")
             self._conn.commit()
+
+    def prune_older_than(self, *, max_age_days: float) -> int:
+        """Drop chart-cache rows whose created_at is older than max_age_days.
+
+        Returns the number of rows deleted. Safe to call periodically; the
+        cost is a single indexed DELETE. Charts that get pruned are
+        regenerated on next request, so this is a disk-space tradeoff
+        against one wait per song. Default policy in production: 30 days.
+        """
+        if max_age_days <= 0:
+            return 0
+        cutoff = time.time() - max_age_days * 86400.0
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM chart_cache WHERE created_at < ?",
+                (cutoff,),
+            )
+            self._conn.commit()
+            return int(cur.rowcount or 0)

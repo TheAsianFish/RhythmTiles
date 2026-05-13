@@ -2,6 +2,49 @@
 
 Append-only log of decisions that shape the project. Each entry records the date, the question, the choice, and why.
 
+## 2026-05-12: Production hardening - queue, audio cap, cache prune
+
+**Question:** The chart-generate endpoint had no concurrency control,
+no audio length cap on the upload path (yt-dlp path already had one
+via `--match-filter "duration < 480"`), and no cache prune. Three
+ways a 24/7 deploy could go wrong: (1) two simultaneous Demucs jobs
+double the memory and serialize on the torch lock anyway with no
+queue feedback to the second client; (2) someone uploads a 30-minute
+mix and wedges the server for an hour; (3) the audio cache grows
+forever as yt-dlp downloads accumulate.
+
+**Choice:**
+- `app/util/concurrency.py` exposes a `chart_slot` async context
+  manager backed by an `asyncio.Semaphore`. Default 1 slot
+  (CPU Demucs saturates anyway); raise via `MAX_CONCURRENT_CHARTS`
+  env. Optional acquire timeout via `CHART_QUEUE_TIMEOUT_S`;
+  exceeding it raises `ChartQueueFull` which the route converts
+  to HTTP 429. Default 0 means fail-fast.
+- `routes/charts.py` wraps the pipeline call (both videoId and
+  upload paths) in `async with chart_slot():`. Also adds a
+  `MAX_UPLOAD_DURATION_S = 480` cap on the upload path matching
+  the yt-dlp filter; longer audio rejects with 413.
+- `app/util/prune.py` walks `<CACHE_DIR>/{audio,beats,onsets,sections}`
+  and deletes files older than `CACHE_MAX_AGE_DAYS` (default 30).
+  `ChartCache.prune_older_than()` mirrors this for the SQLite chart
+  cache. Both run on startup as one-shot tasks; safe to call again
+  by hand or from a cron.
+
+**Why:** Even for the user's current "keeping it local" stance,
+these are cheap and prevent failure modes that would otherwise
+require a server restart. For a public deploy they're table stakes.
+
+**Test:** `tests/test_hardening.py` covers the 8-min upload cap,
+the cap not rejecting short audio, `chart_slot` acquire/release
+correctness, chart-cache row prune by backdated `created_at`, and
+file prune by backdated `mtime`.
+
+**Revisit when:** The deploy target is fixed and we have real
+concurrency numbers. GPU deploys probably want `MAX_CONCURRENT_CHARTS=1`
+still (one GPU = one job); CPU deploys may want fail-fast
+`CHART_QUEUE_TIMEOUT_S=0` so the client gets a clear 429 instead of
+queueing behind a multi-minute Demucs job.
+
 ## 2026-05-12: Remove stem-based hard lane routing
 
 **Question:** When `USE_DEMUCS=1`, lane assignment routed drum onsets

@@ -26,7 +26,8 @@ from app.models import (
     Note,
     PIPELINE_VERSION,
 )
-from app.pipeline.chart_builder import build_chart_from_audio
+from app.pipeline.chart_builder import build_chart_from_audio, load_audio_to_mono
+from app.util.concurrency import ChartQueueFull, chart_slot
 
 router = APIRouter(prefix="/charts", tags=["charts"])
 logger = logging.getLogger("beatbridge.charts")
@@ -34,6 +35,12 @@ logger = logging.getLogger("beatbridge.charts")
 _cache = ChartCache()
 
 _PLACEHOLDER_SUFFIX = "-placeholder"
+
+# Hard cap on upload audio duration in seconds. Matches the
+# `--match-filter "duration < 480"` cap on the yt-dlp path so the upload
+# route can't be used to bypass it. 8 minutes covers ~99% of pop songs;
+# longer mixes are rejected with 413.
+MAX_UPLOAD_DURATION_S = 480.0
 
 
 def _is_placeholder(chart: Chart) -> bool:
@@ -137,13 +144,19 @@ async def generate(req: GenerateRequest) -> Chart:
                     chart=chart_from_hash,
                 )
                 return chart_from_hash
-            chart = build_chart_from_audio(
-                audio_bytes=audio_bytes,
-                filename=ingested.path.name,
-                difficulty=req.difficulty,
-                audio_source="youtube",
-                video_id=req.videoId,
-            )
+            try:
+                async with chart_slot():
+                    chart = build_chart_from_audio(
+                        audio_bytes=audio_bytes,
+                        filename=ingested.path.name,
+                        difficulty=req.difficulty,
+                        audio_source="youtube",
+                        video_id=req.videoId,
+                    )
+            except ChartQueueFull as exc:
+                raise HTTPException(status_code=429, detail=str(exc))
+        except HTTPException:
+            raise
         except Exception as exc:  # noqa: BLE001
             # Loud: this is almost always the reason a player sees a 20-note
             # chart in production. Print the full traceback to the backend
@@ -204,12 +217,35 @@ async def generate_from_audio(
     if cached is not None:
         return cached
 
+    # Audio length cap. Mirrors the yt-dlp `--match-filter "duration < 480"`
+    # on the videoId path so the upload route can't be used to bypass the
+    # 8-minute cap and lock the server on a 30-minute mix. We probe duration
+    # by decoding (load_audio_to_mono handles the formats librosa supports).
     try:
-        chart = build_chart_from_audio(
-            audio_bytes=audio_bytes,
-            filename=audio.filename or "upload.wav",
-            difficulty=difficulty,
+        y, sr = load_audio_to_mono(audio_bytes)
+        duration_s = len(y) / float(sr)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=422, detail=f"could not decode audio: {exc}",
+        ) from exc
+    if duration_s > MAX_UPLOAD_DURATION_S:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"audio too long ({duration_s:.0f}s); cap is "
+                f"{MAX_UPLOAD_DURATION_S:.0f}s. Trim and re-upload."
+            ),
         )
+
+    try:
+        async with chart_slot():
+            chart = build_chart_from_audio(
+                audio_bytes=audio_bytes,
+                filename=audio.filename or "upload.wav",
+                difficulty=difficulty,
+            )
+    except ChartQueueFull as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
     except NotImplementedError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
 

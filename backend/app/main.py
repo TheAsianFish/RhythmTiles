@@ -53,6 +53,39 @@ def create_app() -> FastAPI:
         loop = asyncio.get_event_loop()
         loop.run_in_executor(None, warm_pipeline)
 
+    @app.on_event("startup")
+    async def _prune_caches() -> None:
+        # One-shot prune of stale cached files + chart-cache rows. Cheap
+        # at startup; bounds the disk footprint on long-running deploys.
+        # Failures are swallowed so a permissions glitch doesn't keep the
+        # backend from booting.
+        from app.cache import ChartCache
+        from app.util.prune import prune_caches
+
+        loop = asyncio.get_event_loop()
+
+        def _run() -> None:
+            try:
+                prune_caches()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                from app.config import settings as _s
+                age = float(_s.cache_dir.stat().st_mtime)  # noqa: F841
+                # Chart cache prune uses a 30-day floor by default; the
+                # cache itself reads CACHE_MAX_AGE_DAYS via the prune
+                # helper. We just call its method with the same env value.
+                import os as _os
+                try:
+                    days = float(_os.environ.get("CACHE_MAX_AGE_DAYS", "30"))
+                except ValueError:
+                    days = 30.0
+                ChartCache().prune_older_than(max_age_days=days)
+            except Exception:  # noqa: BLE001
+                pass
+
+        loop.run_in_executor(None, _run)
+
     return app
 
 
