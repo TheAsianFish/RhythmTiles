@@ -2,6 +2,40 @@
 
 Append-only log of decisions that shape the project. Each entry records the date, the question, the choice, and why.
 
+## 2026-05-12: Remove stem-based hard lane routing
+
+**Question:** When `USE_DEMUCS=1`, lane assignment routed drum onsets
+to the low band (lanes 0/1) and vocal onsets to the high band (lanes
+2/3) regardless of spectral centroid. The intuition was "left hand
+plays the drum line, right hand plays the vocal melody" - which felt
+like a feature on paper but was actually a flaw in play: each hand
+owned one instrument, killing per-lane musical variety. The user
+explicitly said "one lane shouldn't be sole dedicated to one thing."
+
+**Choice:** `_band_from_onset` in lane_assign.py now returns the
+centroid split unconditionally. The stem tag still rides on Onset
+objects for future features (stem-aware chord-accent rules, per-stem
+density tuning, debugging) but does NOT decide lane placement. Bright
+drums (high-centroid cymbals) now route to the high band like any
+bright onset; dark vocals route to the low band.
+
+**Why:** Demucs is still valuable in ML-full / ML-max because per-
+stem onset detection produces cleaner note times - kick attacks
+detected from an isolated drum stem are more accurate than kick
+attacks detected from the full mix (they don't compete with bass /
+vocals / synths). The stem-routed-band rule was a separate design
+choice on top of that, and it's the one playtesting rejected.
+
+**Test update:** `test_drum_stem_routes_to_low_band` + the vocal
+mirror test, which asserted the old behaviour, are replaced by
+`test_stem_tag_does_not_dictate_band` which asserts the new one
+(bright drums go high, dark vocals go low).
+
+**Revisit when:** Phase 5 (learned lane assignment) lands. A
+classifier trained on osu!mania charts will pick lanes more
+musically than any rule, and the stem tag becomes a feature among
+many rather than a hard router.
+
 ## 2026-05-12: ML Phase 3 - MERT section detection landed
 
 **Question:** RMS-based section bucketing (`_energy_buckets_for_notes`)

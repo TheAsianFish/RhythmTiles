@@ -58,7 +58,10 @@ Thumbs.db
 
 # Logs
 *.log
-logs/
+# Anchor to repo root so docs/logs/ (intentional doc folder) isn't caught.
+/logs/
+/backend/logs/
+/extension/logs/
 
 # OS
 desktop.ini

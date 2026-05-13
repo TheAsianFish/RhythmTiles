@@ -352,32 +352,43 @@ def test_downbeat_without_match_does_not_force_chord() -> None:
     assert max(by_t.values()) == 1
 
 
-def test_drum_stem_routes_to_low_band() -> None:
-    """Onsets tagged stem='drums' must land in lanes 0/1 even if centroid is high."""
-    onsets = [
-        Onset(t=0.5 * i, strength=0.3, centroid_hz=5000.0, stem="drums")
-        for i in range(8)
-    ]
+def test_stem_tag_does_not_dictate_band() -> None:
+    """After the lane-lockup removal, stem tags must NOT force band routing.
+
+    Earlier versions sent all drum onsets to lanes 0/1 and all vocal
+    onsets to lanes 2/3. That made each hand "own" one instrument,
+    which playtesting showed killed per-lane variety. Now band routing
+    is purely centroid-driven; the stem tag rides on the Onset for
+    other downstream uses but doesn't decide lane placement.
+
+    Test setup: 8 drum-stem onsets alternating centroid between dark
+    (200 Hz) and bright (5000 Hz). Median centroid = 2600 Hz, so dark
+    onsets land in the low band (lanes 0/1) and bright ones in the
+    high band (lanes 2/3) regardless of the drum stem tag. If the old
+    stem-routing rule were still in place, ALL eight would go to
+    lanes 0/1.
+    """
+    onsets = []
+    for i in range(8):
+        # Even indices: dark drum hit (kick); odd: bright drum hit (cymbal).
+        centroid = 200.0 if i % 2 == 0 else 5000.0
+        onsets.append(Onset(t=0.5 * i, strength=0.3, centroid_hz=centroid, stem="drums"))
     notes = assign_lanes(onsets=onsets, y=None, sr=22050)  # type: ignore[arg-type]
-    # All onsets are drum-stem -> all should be in the low band (0 or 1).
-    # The hand-balance rule may flip a few to the right hand to prevent
-    # 3+ same-hand streaks, but the majority must still be left-hand.
-    left_hand = sum(1 for n in notes if n.lane in (0, 1))
-    assert left_hand >= len(notes) // 2, (
-        f"drum stem onsets should mostly land in low band: lanes={[n.lane for n in notes]}"
+    # Group by centroid band: dark must mostly hit low, bright must mostly hit high.
+    dark_in_low = sum(
+        1 for i, n in enumerate(notes) if i % 2 == 0 and n.lane in (0, 1)
     )
-
-
-def test_vocal_stem_routes_to_high_band() -> None:
-    """Onsets tagged stem='vocals' must land in lanes 2/3 even if centroid is low."""
-    onsets = [
-        Onset(t=0.5 * i, strength=0.3, centroid_hz=200.0, stem="vocals")
-        for i in range(8)
-    ]
-    notes = assign_lanes(onsets=onsets, y=None, sr=22050)  # type: ignore[arg-type]
-    right_hand = sum(1 for n in notes if n.lane in (2, 3))
-    assert right_hand >= len(notes) // 2, (
-        f"vocal stem onsets should mostly land in high band: lanes={[n.lane for n in notes]}"
+    bright_in_high = sum(
+        1 for i, n in enumerate(notes) if i % 2 == 1 and n.lane in (2, 3)
+    )
+    # 4 dark + 4 bright; expect majority of each to follow centroid.
+    assert dark_in_low >= 3, (
+        f"dark drum hits should follow centroid to low band: "
+        f"lanes={[n.lane for n in notes]}"
+    )
+    assert bright_in_high >= 3, (
+        f"bright drum hits should follow centroid to high band: "
+        f"lanes={[n.lane for n in notes]}"
     )
 
 

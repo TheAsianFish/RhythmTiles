@@ -125,7 +125,7 @@ difficulties is fast.
 | Downbeats | none | yes (if plausible) | yes (if plausible) |
 | bpmCurve | derived | derived | derived |
 | Onset source | full mix | full mix | per stem + residual |
-| Lane routing | centroid | centroid | stem tag (centroid fallback) |
+| Lane routing | centroid | centroid | centroid (stem tag is informational only) |
 | Chord accents | strength + centroid | strength + centroid OR downbeat | strength + centroid OR downbeat |
 | Cold-start cost | ~10s | ~15-20s | 2-5 min first song, cached after |
 

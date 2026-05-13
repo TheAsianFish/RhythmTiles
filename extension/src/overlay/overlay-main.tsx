@@ -8,6 +8,7 @@ import type { ClockSource } from "@/game/clock";
 import { accuracyPercent } from "@/game/scoring";
 import { hitWindowsForOD, type Judgment, type ScoreState } from "@/game/types";
 import { pingHealthDetailed, type BackendMlFlags } from "@/api/backend-client";
+import { describeProgress, formatElapsed } from "@/utils/loading-progress";
 import {
   loadSettings,
   saveSettings,
@@ -194,6 +195,34 @@ function modeChipFor(
   };
 }
 
+// Live progress display shown inside the menu while a chart fetch is in
+// flight. Ticks every 500ms and predicts the active pipeline stage based
+// on elapsed time + which ML flags the backend reports. Pure client-side
+// estimation; there is no backend status stream.
+function LoadingProgressView({ flags }: { flags: BackendMlFlags | null }) {
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const startRef = useRef<number>(performance.now());
+  useEffect(() => {
+    startRef.current = performance.now();
+    setElapsedMs(0);
+    const id = window.setInterval(() => {
+      setElapsedMs(performance.now() - startRef.current);
+    }, 500);
+    return () => window.clearInterval(id);
+  }, []);
+  const view = describeProgress(elapsedMs, flags);
+  return (
+    <div className={`loading-progress${view.warn ? " loading-progress-warn" : ""}`}>
+      <div className="loading-progress-head">
+        <span className="loading-progress-time">{formatElapsed(elapsedMs)}</span>
+        <span className="loading-progress-stage">{view.stage}</span>
+      </div>
+      <div className="loading-progress-hint">{view.hint}</div>
+      <div className="loading-progress-eta">Expected: {view.expectedTotal}</div>
+    </div>
+  );
+}
+
 function MenuPanel({
   difficulty,
   onDifficultyChange,
@@ -374,6 +403,10 @@ function MenuPanel({
 
         {error && <div className="menu-error">{error}</div>}
 
+        {loading && (
+          <LoadingProgressView flags={backendMl} />
+        )}
+
         <div className="menu-actions">
           {onCancel && (
             <button className="secondary" disabled={loading} onClick={onCancel}>
@@ -381,12 +414,14 @@ function MenuPanel({
             </button>
           )}
           <button className="primary" disabled={loading} onClick={onStart}>
-            {loading ? "Generating..." : "Start"}
+            {loading ? "Generating…" : "Start"}
           </button>
         </div>
-        <div className="menu-hint">
-          Key bindings stay in the extension popup. Offset persists when you tap Start here.
-        </div>
+        {!loading && (
+          <div className="menu-hint">
+            Key bindings stay in the extension popup. Offset persists when you tap Start here.
+          </div>
+        )}
       </div>
     </div>
   );
