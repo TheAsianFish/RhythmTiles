@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Chart, Difficulty } from "@/types/chart";
+import { validateChart } from "@/types/chart";
 import { CanvasRenderer, DEFAULT_RENDER_CONFIG } from "./canvas-renderer";
 import { playHitClick, setHitVolume } from "./sfx";
 import { GameLoop } from "@/game/loop";
@@ -578,6 +579,18 @@ function App() {
           break;
         case "BB_LOAD_CHART": {
           console.log("[BeatBridge] overlay received BB_LOAD_CHART");
+          // Validate the chart shape before letting it into the loop. A
+          // malformed payload (mismatched backend version, content-script
+          // bug, network truncation) would otherwise crash GameLoop on
+          // first frame with no user-visible error. Show the reason in
+          // the existing error banner / menu instead.
+          const invalid = validateChart(m.chart);
+          if (invalid !== null) {
+            console.warn("[BeatBridge] rejected BB_LOAD_CHART:", invalid);
+            setMenuLoading(false);
+            setErrorMsg(`Chart payload invalid: ${invalid}`);
+            break;
+          }
           if (chartTimeoutRef.current !== null) {
             clearTimeout(chartTimeoutRef.current);
             chartTimeoutRef.current = null;
