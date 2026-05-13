@@ -9,19 +9,17 @@ export type { SkinId };
 export interface UserSettings {
   audioLatencyOffsetMs: number;   // calibration result, additive offset
   noteSpeed: number;              // pixels per second, scale factor
-  laneWidthPx: number;
   opacity: number;                // 0-1
   bindings: [string, string, string, string]; // lane 0..3 -> key code
   sfxEnabled: boolean;
   sfxVolume: number;              // 0-1, gain on the hit-click synth
-  overallDifficulty: number;    // OD value for hit windows; default 8
+  overallDifficulty: number;      // OD value for hit windows; default 8
   skinId: SkinId;                 // UI palette (CSS data-bb-skin)
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
   audioLatencyOffsetMs: 0,
   noteSpeed: 1.0,
-  laneWidthPx: 96,
   opacity: 0.92,
   bindings: ["KeyD", "KeyF", "KeyJ", "KeyK"],
   sfxEnabled: true,

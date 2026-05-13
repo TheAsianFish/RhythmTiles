@@ -16,7 +16,11 @@ def test_healthz_ok() -> None:
 
 
 def test_healthz_reports_ml_flags() -> None:
-    """The extension menu reads /healthz.ml to render the active-mode chip."""
+    """The extension menu reads /healthz.ml to render the active-mode chip.
+
+    Every flag the chip consumes must be present in the response shape;
+    missing keys would make the chip display "Restart needed" indefinitely.
+    """
     app = create_app()
     client = TestClient(app)
     body = client.get("/healthz").json()
@@ -27,6 +31,8 @@ def test_healthz_reports_ml_flags() -> None:
     assert isinstance(ml.get("beatThisFlag"), bool)
     assert isinstance(ml.get("beatThisActive"), bool)
     assert isinstance(ml.get("demucsFlag"), bool)
+    assert isinstance(ml.get("mertFlag"), bool)
+    assert isinstance(ml.get("mertActive"), bool)
 
 
 def test_request_id_echoed() -> None:

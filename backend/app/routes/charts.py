@@ -116,6 +116,27 @@ async def generate(req: GenerateRequest) -> Chart:
         try:
             ingested = fetch_videoid(req.videoId)
             audio_bytes = ingested.path.read_bytes()
+            # Secondary cache lookup by audio content hash. Catches the case
+            # where the same audio is reached via a different request key
+            # (e.g. a re-uploaded copy of the song under a different
+            # videoId). Without this, we'd run the multi-minute pipeline
+            # again on identical audio.
+            chart_from_hash = _cache.get(
+                content_hash=ingested.content_hash, difficulty=req.difficulty,
+            )
+            if chart_from_hash is not None and not _is_placeholder(chart_from_hash):
+                logger.info(
+                    "cache hit by contentHash %s/%s (request key %s)",
+                    ingested.content_hash, req.difficulty, cache_key,
+                )
+                # Backfill the request-key cache so the next click is a
+                # direct hit without the audio fetch.
+                _cache.put(
+                    content_hash=cache_key,
+                    difficulty=req.difficulty,
+                    chart=chart_from_hash,
+                )
+                return chart_from_hash
             chart = build_chart_from_audio(
                 audio_bytes=audio_bytes,
                 filename=ingested.path.name,

@@ -6,7 +6,6 @@ import { advanceCursor, findCandidateNote, registerPress, scoreForJudgment } fro
 import { InputCapture, type KeyBindings } from "./input";
 import { applyHit, applyMiss, accuracyPercent, emptyScoreState, multiplierFor } from "./scoring";
 import {
-  DEFAULT_HIT_WINDOWS,
   DEFAULT_OD,
   hitWindowsForOD,
   type ActiveHold,
@@ -365,6 +364,3 @@ export class GameLoop {
   };
 }
 
-// Suppress unused-import warning until we surface DEFAULT_HIT_WINDOWS in the
-// HUD (e.g. a settings panel that displays "current OD => windows").
-void DEFAULT_HIT_WINDOWS;

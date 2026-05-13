@@ -12,7 +12,19 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-PIPELINE_VERSION = "0.1.0"
+# Pipeline version: bumped any time the chart contents could materially
+# differ for the same audio (algorithm changes, ML phase additions, tuning
+# of TARGET_NOTES_PER_SEC or chord/hold gates). Bumping invalidates the
+# chart SQLite cache via the placeholder-vs-real check + a future
+# version-aware invalidation hook.
+#
+# History:
+#   0.1.0  initial v1 pipeline (librosa beats, full-mix onsets,
+#          centroid lane routing, heuristic chord emission).
+#   0.2.0  Beat This!, Demucs per-stem onsets, MERT section
+#          detection, non-overlapping difficulty bands, lane
+#          lockup removed. (2026-05-12)
+PIPELINE_VERSION = "0.2.0"
 SCHEMA_VERSION = "1.0"
 
 Difficulty = Literal["easy", "normal", "hard", "expert"]

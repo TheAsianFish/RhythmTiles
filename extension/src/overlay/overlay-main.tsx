@@ -616,6 +616,14 @@ function App() {
           console.log("[BeatBridge] overlay received BB_NEW_VIDEO", m.videoId);
           cancelCountdown();
           loopRef.current?.pause();
+          // The initial-load 15s "chart not received" timeout was armed when
+          // the iframe first mounted. After an SPA nav we drop into the menu
+          // and the user picks when to start; the timeout would otherwise
+          // fire mid-menu and flash a misleading error banner.
+          if (chartTimeoutRef.current !== null) {
+            clearTimeout(chartTimeoutRef.current);
+            chartTimeoutRef.current = null;
+          }
           setResults(null);
           setChart(null);
           setChartReady(false);
