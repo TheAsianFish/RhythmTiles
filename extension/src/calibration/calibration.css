@@ -15,20 +15,11 @@ body {
   place-items: center;
 }
 
-/* Match popup Pro legibility on pale gradient bleed around the card. */
-:root[data-bb-skin="pro"] body {
-  text-shadow:
-    0 0 1px rgba(0, 0, 0, 0.82),
-    0 1px 3px rgba(0, 0, 0, 0.55);
-}
-
-:root[data-bb-skin="pro"] .card {
-  text-shadow: none;
-}
-
-:root[data-bb-skin="pro"] button {
-  text-shadow: none;
-}
+/* Pro skin: the previous version added dark text-shadows as a band-aid
+   for the charcoal->white body gradient. The new Pro skin uses a flat
+   off-white body + dark text, so the shadows are unnecessary and they
+   actually hurt legibility on the white surface. Intentionally empty
+   block left in case a Pro-only calibration tweak lands later. */
 
 .card {
   background: var(--bb-skin-cal-card-bg);

@@ -9,7 +9,11 @@ html, body {
   padding: 0;
   width: 100%;
   height: 100%;
-  color: var(--bb-skin-text);
+  /* HUD-context text: the body sits on the dark video-overlay gradient
+     regardless of skin (light skins keep the HUD dark for video contrast).
+     --bb-skin-hud-text holds the same value as --bb-skin-text in dark
+     skins; only the Pro skin splits them. */
+  color: var(--bb-skin-hud-text);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   overflow: hidden;
   background: linear-gradient(
@@ -90,7 +94,8 @@ html, body {
   padding: 0 8px;
   font-size: 11px;
   background: rgba(255, 255, 255, 0.08);
-  color: var(--bb-skin-text);
+  /* HUD-context: header sits over the dark video-overlay gradient. */
+  color: var(--bb-skin-hud-text);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   cursor: pointer;
@@ -111,7 +116,8 @@ canvas {
   left: 50%;
   transform: translateX(-50%);
   background: var(--bb-skin-banner-bg);
-  color: var(--bb-skin-text);
+  /* HUD-context: banner sits on the dark banner-bg, always light text. */
+  color: var(--bb-skin-hud-text);
   padding: 6px 12px;
   border-radius: 999px;
   font-size: 11px;
@@ -181,9 +187,12 @@ canvas {
 }
 
 .results button {
-  background: rgba(255, 255, 255, 0.08);
+  /* Use the same menu-btn vars so a light card-bg (Pro) gets a faint
+     gray button instead of the "translucent white" that vanishes on
+     white. Dark skins keep the original translucent appearance. */
+  background: var(--bb-skin-menu-btn-bg);
   color: var(--bb-skin-text);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--bb-skin-menu-btn-border);
   border-radius: 6px;
   padding: 6px 12px;
   font-size: 12px;
@@ -232,7 +241,8 @@ canvas {
   font-size: 14px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.85);
+  /* Card-context: inherits the same dark/light flip as the menu card bg. */
+  color: var(--bb-skin-text);
 }
 
 /* Header row inside the menu card: title on the left, backend-mode chip
@@ -371,9 +381,9 @@ canvas {
 }
 
 .menu-actions button {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bb-skin-menu-btn-bg);
   color: var(--bb-skin-text);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--bb-skin-menu-btn-border);
   border-radius: 6px;
   padding: 6px 14px;
   font-size: 12px;
@@ -466,39 +476,28 @@ canvas {
   color: #6a6f7a;
 }
 
-/* Pro menu/results sit on pale gradient stops but copy stays light. */
-:root[data-bb-skin="pro"] .menu-card .menu-card-header {
-  filter: drop-shadow(0 0 12px rgba(0, 0, 0, 0.45));
+/* Pro skin: the menu card and results card are flat white. Inner
+   children that hardcoded blue/red tints (loading-progress, popup-
+   progress, menu-error) need their colors flipped to dark text +
+   subtle tinted background so they remain readable on white. The
+   previous version's heavy text-shadows were a band-aid for the
+   gradient era and are removed - the new uniform card needs no
+   shadow tricks for legibility. */
+
+:root[data-bb-skin="pro"] .loading-progress {
+  background: rgba(91, 100, 120, 0.06);
+  border-color: rgba(91, 100, 120, 0.25);
+  color: #3a3e47;
 }
 
-:root[data-bb-skin="pro"] .menu-row {
-  color: var(--bb-skin-label);
-  text-shadow:
-    0 0 2px rgba(0, 0, 0, 0.7),
-    0 1px 3px rgba(0, 0, 0, 0.5);
+:root[data-bb-skin="pro"] .loading-progress-warn {
+  background: rgba(196, 138, 50, 0.10);
+  border-color: rgba(196, 138, 50, 0.35);
+  color: #6b4d1f;
 }
 
-:root[data-bb-skin="pro"] .menu-hint {
-  text-shadow:
-    0 0 2px rgba(0, 0, 0, 0.65),
-    0 1px 2px rgba(0, 0, 0, 0.45);
-}
-
-:root[data-bb-skin="pro"] .menu-value {
-  text-shadow:
-    0 0 2px rgba(0, 0, 0, 0.55),
-    0 1px 2px rgba(0, 0, 0, 0.4);
-}
-
-:root[data-bb-skin="pro"] .results-card .row {
-  text-shadow:
-    0 0 2px rgba(0, 0, 0, 0.55),
-    0 1px 2px rgba(0, 0, 0, 0.4);
-}
-
-:root[data-bb-skin="pro"] .results h2,
-:root[data-bb-skin="pro"] .results .score {
-  text-shadow:
-    0 0 8px rgba(0, 0, 0, 0.5),
-    0 2px 4px rgba(0, 0, 0, 0.45);
+:root[data-bb-skin="pro"] .menu-error {
+  background: rgba(180, 30, 30, 0.08);
+  border-color: rgba(180, 30, 30, 0.32);
+  color: #8a1f1f;
 }
