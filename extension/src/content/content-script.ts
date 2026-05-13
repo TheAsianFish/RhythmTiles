@@ -8,7 +8,7 @@
 
 import { generateChart, isPlaceholderChart } from "@/api/backend-client";
 import type { Chart, Difficulty } from "@/types/chart";
-import { loadSettings } from "@/utils/storage";
+import { loadSettings, subscribeSettingsChange } from "@/utils/storage";
 
 const OVERLAY_ID = "beatbridge-overlay-root";
 const CLOCK_TICK_MS = 16;
@@ -47,6 +47,10 @@ let ytNavListener: (() => void) | null = null;
 // Lane bindings snapshot taken on startGame. Used to decide which keys to
 // intercept at the document level before YouTube's player gets them.
 let boundCodes: Set<string> = new Set();
+// Unsubscribe handle for the chrome.storage.onChanged listener that keeps
+// boundCodes in sync with popup changes while a game is running. Null
+// when no listener is registered.
+let bindingsUnsubscribe: (() => void) | null = null;
 // Codes currently held, for repeat-key dedup at the page level. Independent
 // from the iframe's InputCapture pressed-set because the iframe only ever
 // sees the deduplicated stream.
@@ -172,6 +176,14 @@ function attachKeyCapture() {
   };
   window.addEventListener("keydown", keyDownHandler, { capture: true });
   window.addEventListener("keyup", keyUpHandler, { capture: true });
+  // Keep boundCodes in sync if the popup rebinds keys while the game is
+  // running. Previously the popup change would silently land in storage
+  // and the running content script would keep intercepting the old keys.
+  if (!bindingsUnsubscribe) {
+    bindingsUnsubscribe = subscribeSettingsChange(() => {
+      void refreshBoundCodes();
+    });
+  }
 }
 
 function isTypingInEditable(target: EventTarget | null): boolean {
@@ -190,8 +202,25 @@ function detachKeyCapture() {
     window.removeEventListener("keyup", keyUpHandler, { capture: true } as any);
     keyUpHandler = null;
   }
+  if (bindingsUnsubscribe) {
+    bindingsUnsubscribe();
+    bindingsUnsubscribe = null;
+  }
   pageHeldCodes.clear();
   boundCodes = new Set();
+}
+
+// Refresh boundCodes from storage so a popup-side keybinding change takes
+// effect on the running game without an extension reload. Called by the
+// chrome.storage.onChanged listener installed below.
+async function refreshBoundCodes(): Promise<void> {
+  try {
+    const settings = await loadSettings();
+    boundCodes = new Set(settings.bindings);
+  } catch {
+    // Ignore: stale boundCodes is preferable to throwing in a storage
+    // listener callback.
+  }
 }
 
 function removeOverlay() {

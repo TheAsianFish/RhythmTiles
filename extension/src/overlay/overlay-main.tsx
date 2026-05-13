@@ -462,6 +462,11 @@ function App() {
   // Reachability separate from ml info, so the chip can distinguish
   // "backend down" from "backend up but older build with no ml field".
   const [backendReachable, setBackendReachable] = useState<boolean | null>(null);
+  // Incrementing token used to discard stale /healthz responses. If the
+  // user opens, closes, reopens the menu within the 4s ping timeout, the
+  // first ping's response would otherwise land after the second open and
+  // overwrite the fresh state.
+  const backendPingTokenRef = useRef(0);
   const [dragging, setDragging] = useState(false);
   const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
   // Countdown state: null when no countdown is active, 3/2/1/0 (GO!) otherwise.
@@ -917,9 +922,13 @@ function App() {
   async function refreshBackendMode() {
     // Re-fetch each time we (re)show the menu so the indicator reflects
     // any flag flip the user made on the backend side since last open.
+    // The token gate discards stale responses if the user closes + reopens
+    // the menu before this one resolves.
+    const token = ++backendPingTokenRef.current;
     setBackendMl(null);
     setBackendReachable(null);
     const ping = await pingHealthDetailed();
+    if (token !== backendPingTokenRef.current) return;
     setBackendReachable(ping.ok);
     setBackendMl(ping.ok && ping.ml ? ping.ml : null);
   }
@@ -938,14 +947,24 @@ function App() {
   }
 
   async function startFromMenu() {
-    // Persist edited settings, then ask the content script to (re)fetch the
-    // chart at the chosen difficulty. The new chart arrives via BB_LOAD_CHART
-    // which closes the menu and sets up the loop. The first BB_VIDEO_PLAYING
-    // for the fresh chart skips the countdown (initial start, not resume),
-    // matching the popup's Start Game flow.
+    // Persist edited settings either way. The visual ones (opacity,
+    // noteSpeed, sfxVolume, OD) are re-read by the loop-boot useEffect
+    // on the next mount, but most of them also need a chart regenerate
+    // to take effect for the user's expected reasons.
     await saveSettings(menuSettings);
-    setMenuLoading(true);
     setErrorMsg(null);
+    // Hot path: difficulty unchanged AND a chart is already loaded for
+    // this video. Just close the menu and resume - no need to pay the
+    // multi-minute Demucs/MERT cost just to change a volume slider.
+    const difficultyChanged = menuDifficulty !== difficulty;
+    if (!difficultyChanged && chart && chartReady) {
+      setMenuOpen(false);
+      // Resume from wherever the user was paused, with a countdown.
+      window.parent.postMessage({ type: "BB_REQUEST_VIDEO_PLAY" }, "*");
+      return;
+    }
+    // Cold path: difficulty changed OR no chart yet. Re-fetch.
+    setMenuLoading(true);
     window.parent.postMessage(
       { type: "BB_REQUEST_NEW_CHART", difficulty: menuDifficulty },
       "*",
