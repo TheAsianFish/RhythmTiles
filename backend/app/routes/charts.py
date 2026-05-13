@@ -43,6 +43,29 @@ _PLACEHOLDER_SUFFIX = "-placeholder"
 MAX_UPLOAD_DURATION_S = 480.0
 
 
+def _mode_key() -> str:
+    """Compact tag for the current ML-flag combination, baked into the
+    chart cache key so a song generated under one mode is NOT served
+    when the user is running a different mode.
+
+    Format `vMAJOR-bt{0|1}-dm{0|1}-mt{0|1}` where MAJOR is the major+
+    minor of PIPELINE_VERSION. A bump to PIPELINE_VERSION therefore
+    auto-invalidates the cache; flag changes do too. Patch-level bumps
+    are deliberately ignored - they shouldn't change chart output.
+    """
+    major_minor = ".".join(PIPELINE_VERSION.split(".")[:2])
+    return (
+        f"v{major_minor}-bt{int(settings.use_beat_this)}"
+        f"-dm{int(settings.use_demucs)}-mt{int(settings.use_mert)}"
+    )
+
+
+def _cache_key(base: str) -> str:
+    """Compose `<base>|<mode_key>` so the same audio under different
+    modes occupies different cache rows."""
+    return f"{base}|{_mode_key()}"
+
+
 def _is_placeholder(chart: Chart) -> bool:
     """Was this chart produced by `_hardcoded_chart`, or by the real pipeline?
 
@@ -106,11 +129,16 @@ async def generate(req: GenerateRequest) -> Chart:
     )
 
     cache_key = req.videoId or req.audioUrl or "unknown"
-    cached = _cache.get(content_hash=cache_key, difficulty=req.difficulty)
+    # Mode-aware cache key: a chart generated under ML-light must NOT be
+    # served when the user is running ML-full. _cache_key() folds the
+    # current pipeline version + the three ML flags into the lookup so
+    # each mode has its own cache namespace.
+    keyed = _cache_key(cache_key)
+    cached = _cache.get(content_hash=keyed, difficulty=req.difficulty)
     # Cached placeholders are never returned. They poison subsequent requests
     # once the operator turns ytdlp on. We always re-generate in that case.
     if cached is not None and not _is_placeholder(cached):
-        logger.info("cache hit for %s/%s", cache_key, req.difficulty)
+        logger.info("cache hit for %s/%s mode=%s", cache_key, req.difficulty, _mode_key())
         return cached
     if cached is not None:
         logger.warning(
@@ -127,19 +155,20 @@ async def generate(req: GenerateRequest) -> Chart:
             # where the same audio is reached via a different request key
             # (e.g. a re-uploaded copy of the song under a different
             # videoId). Without this, we'd run the multi-minute pipeline
-            # again on identical audio.
+            # again on identical audio. Mode-aware via _cache_key().
+            keyed_hash = _cache_key(ingested.content_hash)
             chart_from_hash = _cache.get(
-                content_hash=ingested.content_hash, difficulty=req.difficulty,
+                content_hash=keyed_hash, difficulty=req.difficulty,
             )
             if chart_from_hash is not None and not _is_placeholder(chart_from_hash):
                 logger.info(
-                    "cache hit by contentHash %s/%s (request key %s)",
-                    ingested.content_hash, req.difficulty, cache_key,
+                    "cache hit by contentHash %s/%s mode=%s (request key %s)",
+                    ingested.content_hash, req.difficulty, _mode_key(), cache_key,
                 )
                 # Backfill the request-key cache so the next click is a
                 # direct hit without the audio fetch.
                 _cache.put(
-                    content_hash=cache_key,
+                    content_hash=keyed,
                     difficulty=req.difficulty,
                     chart=chart_from_hash,
                 )
@@ -180,11 +209,16 @@ async def generate(req: GenerateRequest) -> Chart:
 
     # Skip cache writes for placeholders. Real charts get cached under both
     # the request key (for popup re-clicks) and the audio hash (for re-use
-    # across request shapes pointing at the same audio).
+    # across request shapes pointing at the same audio). Mode-aware keys
+    # via _cache_key() so different ML modes don't cross-pollinate.
     if not _is_placeholder(chart):
-        _cache.put(content_hash=cache_key, difficulty=req.difficulty, chart=chart)
+        _cache.put(content_hash=keyed, difficulty=req.difficulty, chart=chart)
         if chart.audio.contentHash:
-            _cache.put(content_hash=chart.audio.contentHash, difficulty=req.difficulty, chart=chart)
+            _cache.put(
+                content_hash=_cache_key(chart.audio.contentHash),
+                difficulty=req.difficulty,
+                chart=chart,
+            )
     return chart
 
 
@@ -213,7 +247,8 @@ async def generate_from_audio(
 
     # Persist to the cache dir so we can keep it for debugging and replays.
     ingested = bytes_to_disk(audio_bytes, suffix=Path(audio.filename or "upload.wav").suffix or ".wav")
-    cached = _cache.get(content_hash=ingested.content_hash, difficulty=difficulty)
+    keyed_hash = _cache_key(ingested.content_hash)
+    cached = _cache.get(content_hash=keyed_hash, difficulty=difficulty)
     if cached is not None:
         return cached
 
@@ -249,13 +284,15 @@ async def generate_from_audio(
     except NotImplementedError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
 
-    _cache.put(content_hash=ingested.content_hash, difficulty=difficulty, chart=chart)
+    _cache.put(content_hash=keyed_hash, difficulty=difficulty, chart=chart)
     return chart
 
 
 @router.get("/{content_hash}", response_model=Chart, response_model_exclude_none=True)
 async def get_chart(content_hash: str, difficulty: str = "normal") -> Chart:
-    chart = _cache.get(content_hash=content_hash, difficulty=difficulty)
+    # Mode-aware lookup: the cache stores under "<hash>|<mode>" so a raw
+    # content_hash from a URL needs the mode suffix applied.
+    chart = _cache.get(content_hash=_cache_key(content_hash), difficulty=difficulty)
     if chart is None:
         raise HTTPException(status_code=404, detail="chart not found")
     return chart
