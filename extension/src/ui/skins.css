@@ -316,69 +316,109 @@
   --bb-lane-inner: #ffb04a;
 }
 
-/* Washed monochrome: bright gray chrome, lanes all white (no D/F vs J/K hue split). */
+/*
+ * osu-style minimal grayscale: HUD stays dark. Menus use a charcoal → silver →
+ * nearly-white gradient; copy stays light with a faint shadow near the pale end.
+ * Lanes match gray hit-circle fills (~#aaa) with NO outer/inner hue split.
+ */
 :root[data-bb-skin="pro"] {
-  color-scheme: light;
+  color-scheme: dark;
 
-  --bb-skin-page-bg: #e2e4e9;
-  --bb-skin-text: #383940;
-  --bb-skin-muted: #71757e;
-  --bb-skin-label: #585c66;
-  --bb-skin-hint: #8c909a;
-  --bb-skin-border: #c2c6cf;
+  /* Popup chrome (full gradient string). */
+  --bb-skin-page-bg: linear-gradient(
+    165deg,
+    #0e0e10 0%,
+    #17181d 38%,
+    #2f3138 65%,
+    #5f636e 82%,
+    #9ea2ad 93%,
+    #e9ebf2 100%
+  );
 
-  --bb-skin-btn-bg: #f4f5f8;
-  --bb-skin-btn-hover: #eaecef;
-  --bb-skin-surface-alt: #eceef2;
-  --bb-skin-surface-muted: #e9ebf0;
+  /* Calibration tab shares the gradient (see calibration.css fallback). */
+  --bb-skin-cal-body-bg: linear-gradient(
+    165deg,
+    #0e0e10 0%,
+    #17181d 35%,
+    #2f3138 62%,
+    #5f636e 80%,
+    #9ea2ad 92%,
+    #e9ebf2 100%
+  );
 
-  --bb-skin-accent-a: #cfd2d9;
-  --bb-skin-accent-b: #b4b9c4;
-  --bb-skin-accent-border: #a8acb6;
-  --bb-skin-accent-solid: #9ea4b0;
-  --bb-skin-menu-accent: #9298a6;
+  --bb-skin-text: #eaebf0;
+  --bb-skin-muted: #afb3be;
+  --bb-skin-label: #cdd0da;
+  --bb-skin-hint: #8f939e;
+  --bb-skin-border: rgba(255, 255, 255, 0.14);
 
-  --bb-skin-cal-radial-mid: #e8eaef;
-  --bb-skin-cal-radial-edge: #d6d9e2;
-  --bb-skin-cal-card-bg: rgba(246, 247, 250, 0.92);
+  --bb-skin-btn-bg: rgba(255, 255, 255, 0.08);
+  --bb-skin-btn-hover: rgba(255, 255, 255, 0.12);
+  --bb-skin-surface-alt: rgba(10, 10, 12, 0.45);
+  --bb-skin-surface-muted: rgba(12, 12, 14, 0.5);
 
-  --bb-skin-cal-dot-off: #c9cdd6;
-  --bb-skin-cal-dot-on: #f0f2f7;
+  --bb-skin-accent-a: #8e929d;
+  --bb-skin-accent-b: #5e626c;
+  --bb-skin-accent-border: #6a6f7a;
+  --bb-skin-accent-solid: #a3a8b5;
+  --bb-skin-menu-accent: #b8bcc8;
 
-  --bb-skin-cal-tap-dash: #bcc0c9;
-  --bb-skin-cal-tap-dash-armed-border: #9ea4b0;
-  --bb-skin-cal-tap-dash-armed-text: #383940;
+  --bb-skin-cal-radial-mid: #1a1b20;
+  --bb-skin-cal-radial-edge: #0c0d10;
+  --bb-skin-cal-card-bg: linear-gradient(
+    180deg,
+    rgba(18, 19, 22, 0.94) 0%,
+    rgba(28, 29, 34, 0.92) 100%
+  );
 
-  --bb-skin-status-border: #c2c6cf;
+  --bb-skin-cal-dot-off: #3a3c44;
+  --bb-skin-cal-dot-on: #e4e6ed;
 
-  --bb-skin-ov-rgb-0: 234, 236, 240;
-  --bb-skin-ov-rgb-1: 228, 230, 235;
-  --bb-skin-ov-rgb-2: 222, 224, 230;
-  --bb-skin-banner-bg: rgba(240, 242, 246, 0.9);
+  --bb-skin-cal-tap-dash: rgba(255, 255, 255, 0.28);
+  --bb-skin-cal-tap-dash-armed-border: #c9cdd8;
+  --bb-skin-cal-tap-dash-armed-text: #f2f4f9;
 
-  --bb-skin-header-shine-top: rgba(255, 255, 255, 0.55);
-  --bb-skin-header-shine-bot: rgba(255, 255, 255, 0.2);
-  --bb-skin-header-line: rgba(70, 75, 86, 0.12);
-  --bb-skin-header-grip: rgba(72, 78, 90, 0.35);
-  --bb-skin-title: rgba(54, 58, 68, 0.78);
+  --bb-skin-status-border: rgba(255, 255, 255, 0.12);
 
-  --bb-skin-chip-diff-bg: rgba(88, 92, 102, 0.1);
-  --bb-skin-chip-diff-border: rgba(88, 92, 102, 0.22);
-  --bb-skin-chip-diff-text: rgba(54, 58, 68, 0.88);
+  /* In-game HUD: dark panel (readable gray notes vs white rims in canvas strokes). */
+  --bb-skin-ov-rgb-0: 10, 10, 11;
+  --bb-skin-ov-rgb-1: 16, 16, 18;
+  --bb-skin-ov-rgb-2: 22, 22, 25;
+  --bb-skin-banner-bg: rgba(18, 19, 22, 0.92);
 
-  --bb-skin-countdown-shadow: rgba(255, 255, 255, 0.72);
+  --bb-skin-header-shine-top: rgba(255, 255, 255, 0.06);
+  --bb-skin-header-shine-bot: rgba(255, 255, 255, 0.02);
+  --bb-skin-header-line: rgba(255, 255, 255, 0.1);
+  --bb-skin-header-grip: rgba(235, 236, 240, 0.45);
+  --bb-skin-title: rgba(238, 240, 245, 0.78);
 
-  --bb-skin-results-scrim: rgba(56, 60, 70, 0.35);
-  --bb-skin-elev-bg: #f6f7fa;
-  --bb-skin-elev-border: #c8ccd4;
+  --bb-skin-chip-diff-bg: rgba(255, 255, 255, 0.1);
+  --bb-skin-chip-diff-border: rgba(255, 255, 255, 0.28);
+  --bb-skin-chip-diff-text: rgba(246, 247, 250, 0.95);
 
-  --bb-skin-menu-select-bg: #f0f1f5;
-  --bb-skin-menu-select-border: #b8bdc8;
+  --bb-skin-countdown-shadow: rgba(255, 255, 255, 0.35);
 
-  --bb-skin-menu-primary-bg-a: rgba(148, 155, 170, 0.28);
-  --bb-skin-menu-primary-border: rgba(118, 125, 140, 0.45);
-  --bb-skin-menu-primary-text: #2e3138;
+  --bb-skin-results-scrim: rgba(0, 0, 0, 0.55);
 
-  --bb-lane-outer: #ffffff;
-  --bb-lane-inner: #ffffff;
+  /* In-overlay menu cards: gradient menu face (readable over HUD dimming). */
+  --bb-skin-elev-bg: linear-gradient(
+    178deg,
+    #121317 0%,
+    #1e2026 45%,
+    #3f424c 78%,
+    #8c909c 93%,
+    #dde0ea 100%
+  );
+  --bb-skin-elev-border: rgba(255, 255, 255, 0.16);
+
+  --bb-skin-menu-select-bg: rgba(20, 21, 24, 0.55);
+  --bb-skin-menu-select-border: rgba(255, 255, 255, 0.2);
+
+  --bb-skin-menu-primary-bg-a: rgba(200, 204, 214, 0.18);
+  --bb-skin-menu-primary-border: rgba(230, 232, 240, 0.35);
+  --bb-skin-menu-primary-text: #f8f9fc;
+
+  /* Same gray outer+inner (~osu hit circle gray), not white-on-white vs HUD. */
+  --bb-lane-outer: #aaaaaa;
+  --bb-lane-inner: #aaaaaa;
 }

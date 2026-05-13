@@ -18,6 +18,11 @@ import {
   type UserSettings,
 } from "@/utils/storage";
 import { applyDocumentSkin } from "@/ui/apply-skin";
+import {
+  AUDIO_OFFSET_MS_MAX,
+  AUDIO_OFFSET_MS_MIN,
+  clampAudioOffsetMs,
+} from "@/utils/audio-offset";
 import { SKIN_IDS, SKIN_LABELS } from "@/ui/skins";
 
 // React's useEffect fires asynchronously after paint. postMessage from the
@@ -279,6 +284,42 @@ function MenuPanel({
         </div>
 
         <div className="menu-row">
+          <label htmlFor="m-offset-num">Audio offset (ms)</label>
+          <input
+            id="m-offset-num"
+            type="number"
+            className="menu-offset-input"
+            min={AUDIO_OFFSET_MS_MIN}
+            max={AUDIO_OFFSET_MS_MAX}
+            step={1}
+            value={settings.audioLatencyOffsetMs}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (Number.isNaN(v)) return;
+              updateSetting("audioLatencyOffsetMs", clampAudioOffsetMs(v));
+            }}
+          />
+        </div>
+        <input
+          id="m-offset-range"
+          type="range"
+          aria-label="Audio offset"
+          min={AUDIO_OFFSET_MS_MIN}
+          max={AUDIO_OFFSET_MS_MAX}
+          step={5}
+          value={clampAudioOffsetMs(settings.audioLatencyOffsetMs)}
+          onChange={(e) =>
+            updateSetting(
+              "audioLatencyOffsetMs",
+              clampAudioOffsetMs(Number(e.target.value)),
+            )
+          }
+        />
+        <div className="menu-hint">
+          Same field as popup / calibration (&plusmn;{Math.abs(AUDIO_OFFSET_MS_MIN)} ms).
+        </div>
+
+        <div className="menu-row">
           <label htmlFor="m-speed">Note speed</label>
           <span className="menu-value">{settings.noteSpeed.toFixed(2)}x</span>
         </div>
@@ -344,7 +385,7 @@ function MenuPanel({
           </button>
         </div>
         <div className="menu-hint">
-          Key bindings and calibration live in the extension popup.
+          Key bindings stay in the extension popup. Offset persists when you tap Start here.
         </div>
       </div>
     </div>
@@ -450,15 +491,16 @@ function App() {
     };
   }, [dragging]);
 
-  // Skin from chrome.storage (+ live updates from the popup).
+  // Skin + timing offset when chrome.storage updates (popup) or iframe loads.
   useEffect(() => {
-    async function syncSkinFromStorage() {
+    async function syncStoredSkinAndLatency() {
       const s = await loadSettings();
       applyDocumentSkin(s.skinId);
       rendererRef.current?.syncLaneColorsFromCss();
+      loopRef.current?.setLatencyOffsetMs(s.audioLatencyOffsetMs);
     }
-    void syncSkinFromStorage();
-    return subscribeSettingsChange(() => void syncSkinFromStorage());
+    void syncStoredSkinAndLatency();
+    return subscribeSettingsChange(() => void syncStoredSkinAndLatency());
   }, []);
 
   // Preview skin edits in the in-game menu before the user clicks Start.
@@ -822,14 +864,13 @@ function App() {
   }
 
   function closeMenuWithoutApplying() {
-    // Discard menu edits by restoring the persisted skin palette (among
-    // other unstored fields loaded on next Start). Binding changes still
-    // need Start to regenerate; opacity/sfx previews without save follow
-    // the same rollback as appearance.
+    // Discard menu edits by restoring persisted skin palette and latency
+    // preview until Start commits.
     void (async () => {
       const s = await loadSettings();
       applyDocumentSkin(s.skinId);
       rendererRef.current?.syncLaneColorsFromCss();
+      loopRef.current?.setLatencyOffsetMs(s.audioLatencyOffsetMs);
       setMenuOpen(false);
       setErrorMsg(null);
     })();
@@ -851,7 +892,12 @@ function App() {
   }
 
   function updateMenuSetting<K extends keyof UserSettings>(key: K, value: UserSettings[K]) {
-    setMenuSettings((prev) => ({ ...prev, [key]: value }));
+    let out = value;
+    if (key === "audioLatencyOffsetMs" && typeof value === "number") {
+      out = clampAudioOffsetMs(value) as UserSettings[K];
+      loopRef.current?.setLatencyOffsetMs(out as number);
+    }
+    setMenuSettings((prev) => ({ ...prev, [key]: out }));
   }
 
   function restart() {

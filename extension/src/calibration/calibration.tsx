@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { computeCalibrationOffset, metronomeBeats } from "@/game/calibration";
 import { loadSettings, saveSettings } from "@/utils/storage";
+import { clampAudioOffsetMs } from "@/utils/audio-offset";
 import { applyDocumentSkin } from "@/ui/apply-skin";
 
 const BPM = 120;
@@ -93,7 +94,7 @@ function App() {
   async function save() {
     if (!result) return;
     const settings = await loadSettings();
-    const rounded = Math.round(result.offsetMs);
+    const rounded = clampAudioOffsetMs(Math.round(result.offsetMs));
     await saveSettings({ ...settings, audioLatencyOffsetMs: rounded });
     setSavedOffsetMs(rounded);
     setJustReset(false);

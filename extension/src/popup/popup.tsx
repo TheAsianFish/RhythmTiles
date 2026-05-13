@@ -4,6 +4,11 @@ import { backendUrl, pingHealthDetailed } from "@/api/backend-client";
 import type { Difficulty } from "@/types/chart";
 import { hitWindowsForOD } from "@/game/types";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type UserSettings } from "@/utils/storage";
+import {
+  AUDIO_OFFSET_MS_MIN,
+  AUDIO_OFFSET_MS_MAX,
+  clampAudioOffsetMs,
+} from "@/utils/audio-offset";
 import { applyDocumentSkin } from "@/ui/apply-skin";
 import { SKIN_IDS, SKIN_LABELS } from "@/ui/skins";
 
@@ -311,6 +316,39 @@ function App() {
           )}
           <div className="hint" style={{ marginTop: -4 }}>
             Click a key, then press the new binding. Escape to cancel.
+          </div>
+
+          <div className="row">
+            <label htmlFor="audio-offset-num">Audio offset (ms)</label>
+            <input
+              id="audio-offset-num"
+              type="number"
+              className="offset-ms-input"
+              min={AUDIO_OFFSET_MS_MIN}
+              max={AUDIO_OFFSET_MS_MAX}
+              step={1}
+              value={settings.audioLatencyOffsetMs}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (Number.isNaN(v)) return;
+                void update({ audioLatencyOffsetMs: clampAudioOffsetMs(v) });
+              }}
+            />
+          </div>
+          <input
+            id="audio-offset-slider"
+            aria-label="Audio offset"
+            type="range"
+            min={AUDIO_OFFSET_MS_MIN}
+            max={AUDIO_OFFSET_MS_MAX}
+            step={5}
+            value={clampAudioOffsetMs(settings.audioLatencyOffsetMs)}
+            onChange={(e) =>
+              void update({ audioLatencyOffsetMs: clampAudioOffsetMs(Number(e.target.value)) })}
+          />
+          <div className="hint" style={{ marginTop: -8 }}>
+            Milliseconds layered on playback time for judgment. Matches the calibration tab; type a value or scrub (&plusmn;{Math.abs(AUDIO_OFFSET_MS_MIN)} ms). Use{" "}
+            <strong>Calibrate timing</strong> below for a measured baseline.
           </div>
 
           <div className="row">

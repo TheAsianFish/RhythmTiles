@@ -11,6 +11,19 @@ body {
   color: var(--bb-skin-text);
 }
 
+/* Light copy + edge shadow stays legible across the pale end of Pro’s gradient. */
+:root[data-bb-skin="pro"] body {
+  text-shadow:
+    0 0 1px rgba(0, 0, 0, 0.8),
+    0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+:root[data-bb-skin="pro"] .status,
+:root[data-bb-skin="pro"] .keycap.capturing,
+:root[data-bb-skin="pro"] button {
+  text-shadow: none;
+}
+
 .app {
   padding: 20px;
   display: flex;
@@ -161,4 +174,15 @@ input[type="checkbox"] {
   accent-color: var(--bb-skin-accent-solid);
   width: 16px;
   height: 16px;
+}
+
+input.offset-ms-input[type="number"] {
+  width: 72px;
+  padding: 6px 8px;
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid var(--bb-skin-border);
+  background: var(--bb-skin-btn-bg);
+  color: var(--bb-skin-text);
+  font-variant-numeric: tabular-nums;
 }

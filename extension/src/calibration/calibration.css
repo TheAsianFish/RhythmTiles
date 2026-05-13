@@ -5,10 +5,29 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: radial-gradient(circle at top, var(--bb-skin-cal-radial-mid), var(--bb-skin-cal-radial-edge));
+  /* Pro (and future skins) can override with a flat gradient layer. */
+  background: var(
+    --bb-skin-cal-body-bg,
+    radial-gradient(circle at top, var(--bb-skin-cal-radial-mid), var(--bb-skin-cal-radial-edge))
+  );
   color: var(--bb-skin-text);
   display: grid;
   place-items: center;
+}
+
+/* Match popup Pro legibility on pale gradient bleed around the card. */
+:root[data-bb-skin="pro"] body {
+  text-shadow:
+    0 0 1px rgba(0, 0, 0, 0.82),
+    0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+:root[data-bb-skin="pro"] .card {
+  text-shadow: none;
+}
+
+:root[data-bb-skin="pro"] button {
+  text-shadow: none;
 }
 
 .card {
