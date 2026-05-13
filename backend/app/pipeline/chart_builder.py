@@ -1,8 +1,15 @@
 """Glue that wires the pipeline stages into a Chart.
 
-Stage 1 stub: this raises NotImplementedError for paths that need real audio.
-Stage 2 lands the actual implementation that calls beat_track, onset_detect,
-lane_assign, and difficulty in sequence.
+Calls (in order): load_audio_to_mono -> detect_beats -> separate_stems
+(optional) -> detect_onsets / detect_onsets_per_stem -> snap_onsets_to_beats
+-> fill_empty_beats -> add_subdivision_onsets -> assign_lanes -> MERT
+section labelling (optional) -> shape_difficulty -> detect_holds -> Chart.
+
+ML stages (Beat This!, Demucs, MERT) all gate behind env flags or per-call
+kwargs and fall back to the librosa heuristic on failure. The chart cache
+keys by audio content hash; the per-stage caches (beats, per-stem onsets,
+sections) reuse the same hash so re-generating at a different difficulty
+is fast.
 """
 
 from __future__ import annotations

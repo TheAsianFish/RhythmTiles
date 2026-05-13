@@ -38,8 +38,11 @@ HIT_WINDOW_S = 0.080
 FALLBACK_CUTOFF_HZ = 1500.0
 
 # Onsets whose normalized strength is at or above this quantile become chord
-# candidates. 0.88 produces roughly 10-12% chord rate after lane-capacity
-# filtering on typical pop music; tune by playtesting.
+# candidates. This is the FALLBACK default when chart_builder doesn't pass an
+# explicit chord_quantile - the live values live in
+# chart_builder._DIFFICULTY_TUNING (currently 0.97 / 0.94 / 0.89 / 0.84 for
+# easy / normal / hard / expert) and target a 3-6% chord rate after the
+# centroid gate + lane-capacity filter.
 CHORD_STRENGTH_QUANTILE = 0.88
 
 # Below this onset count we never emit chords (the strength distribution is

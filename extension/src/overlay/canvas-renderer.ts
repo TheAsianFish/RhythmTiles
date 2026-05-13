@@ -100,7 +100,7 @@ function freshAnimState(): AnimState {
 export class CanvasRenderer {
   private ctx: CanvasRenderingContext2D;
   private config: RenderConfig;
-  /** Lanes 0/3 outer pair, 1/3 inner pair; synced from skins.css via --bb-lane-*. */
+  /** Lanes 0/3 outer pair, 1/2 inner pair; synced from skins.css via --bb-lane-*. */
   private laneColors: [string, string, string, string] = [
     DEFAULT_LANE_OUTER,
     DEFAULT_LANE_INNER,

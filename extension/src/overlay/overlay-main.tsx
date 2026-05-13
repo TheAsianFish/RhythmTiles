@@ -799,6 +799,11 @@ function App() {
       // back on top of the fresh replay). The countdown's resume() at the
       // end of 3-2-1 starts the rAF for real.
       const isReplay = pendingReplayRef.current;
+      // Final cancellation gate: if a rapid setChart(null)+setChart(c)
+      // came through while we were awaiting loadSettings/loadBestScore,
+      // the previous cleanup may have already fired. Don't attach a
+      // second loop on top of the new effect's loop.
+      if (cancelled) return;
       loop.start(window, { startPaused: isReplay });
       loopRef.current = loop;
 

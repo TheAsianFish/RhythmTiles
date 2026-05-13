@@ -168,8 +168,10 @@ async def generate_from_audio(
     Available when the real pipeline is wired in (Stage 2).
     Until then this endpoint will reject with 501 unless the file is a WAV.
     """
-    if difficulty not in {"easy", "normal", "hard"}:
-        raise HTTPException(status_code=422, detail="difficulty must be easy/normal/hard")
+    if difficulty not in {"easy", "normal", "hard", "expert"}:
+        raise HTTPException(
+            status_code=422, detail="difficulty must be easy/normal/hard/expert",
+        )
 
     audio_bytes = await audio.read()
     if not audio_bytes:
