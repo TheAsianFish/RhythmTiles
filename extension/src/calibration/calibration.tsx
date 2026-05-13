@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { computeCalibrationOffset, metronomeBeats } from "@/game/calibration";
 import { loadSettings, saveSettings } from "@/utils/storage";
+import { applyDocumentSkin } from "@/ui/apply-skin";
 
 const BPM = 120;
 const BEATS = 16;
@@ -16,10 +17,20 @@ function App() {
     usableTaps: number;
     stdDevMs: number;
   }>(null);
+  const [savedOffsetMs, setSavedOffsetMs] = useState<number | null>(null);
+  const [justReset, setJustReset] = useState(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const audioStartPerfRef = useRef<number>(0);
   const expectedBeatsRef = useRef<number[]>([]);
   const tapPerfMsRef = useRef<number[]>([]);
+
+  useEffect(() => {
+    loadSettings().then((s) => setSavedOffsetMs(s.audioLatencyOffsetMs));
+  }, []);
+
+  useEffect(() => {
+    void loadSettings().then((s) => applyDocumentSkin(s.skinId));
+  }, []);
 
   useEffect(() => {
     function onKey(ev: KeyboardEvent) {
@@ -82,7 +93,17 @@ function App() {
   async function save() {
     if (!result) return;
     const settings = await loadSettings();
-    await saveSettings({ ...settings, audioLatencyOffsetMs: Math.round(result.offsetMs) });
+    const rounded = Math.round(result.offsetMs);
+    await saveSettings({ ...settings, audioLatencyOffsetMs: rounded });
+    setSavedOffsetMs(rounded);
+    setJustReset(false);
+  }
+
+  async function resetOffset() {
+    const settings = await loadSettings();
+    await saveSettings({ ...settings, audioLatencyOffsetMs: 0 });
+    setSavedOffsetMs(0);
+    setJustReset(true);
   }
 
   return (
@@ -108,7 +129,18 @@ function App() {
             Save offset
           </button>
         )}
+        {phase !== "running" && savedOffsetMs !== null && savedOffsetMs !== 0 && (
+          <button className="secondary" onClick={resetOffset}>
+            Reset to 0
+          </button>
+        )}
       </div>
+      {phase !== "running" && savedOffsetMs !== null && (
+        <div style={{ marginTop: 8, color: "#98a3b3", fontSize: 13 }}>
+          Current saved offset: <strong>{savedOffsetMs} ms</strong>
+          {justReset && <span style={{ marginLeft: 8, color: "#7dd87d" }}>reset.</span>}
+        </div>
+      )}
       {result && (
         <div className="result">
           <div>

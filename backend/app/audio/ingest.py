@@ -105,8 +105,8 @@ def fetch_videoid(video_id: str) -> Ingested:
         "--no-progress",
         "--quiet",
         "--ffmpeg-location", ffmpeg,
-        # 8-minute cap defends against an accidentally-pasted livestream id.
-        "--match-filter", "duration < 480",
+        # 30-minute cap defends against an accidentally-pasted livestream id.
+        "--match-filter", "duration < 1800",
         f"https://www.youtube.com/watch?v={video_id}",
     ]
     logger.info("yt-dlp fetch videoId=%s ffmpeg=%s", video_id, ffmpeg)

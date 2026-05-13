@@ -1,13 +1,14 @@
+@import "../ui/skins.css";
+
 :root {
-  color-scheme: dark;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 body {
   margin: 0;
   width: 320px;
-  background: #0d0f12;
-  color: #f4f6f8;
+  background: var(--bb-skin-page-bg);
+  color: var(--bb-skin-text);
 }
 
 .app {
@@ -24,7 +25,7 @@ h1 {
 
 .subtitle {
   font-size: 13px;
-  color: #98a3b3;
+  color: var(--bb-skin-muted);
   margin: 0 0 12px;
 }
 
@@ -82,15 +83,15 @@ button {
   font-size: 14px;
   padding: 10px 14px;
   border-radius: 8px;
-  border: 1px solid #2a2f37;
-  background: #1a1d22;
-  color: #f4f6f8;
+  border: 1px solid var(--bb-skin-border);
+  background: var(--bb-skin-btn-bg);
+  color: var(--bb-skin-text);
   cursor: pointer;
 }
 
 button.primary {
-  background: linear-gradient(180deg, #4f8cff, #335fcb);
-  border-color: #335fcb;
+  background: linear-gradient(180deg, var(--bb-skin-accent-a), var(--bb-skin-accent-b));
+  border-color: var(--bb-skin-accent-border);
   font-weight: 600;
 }
 
@@ -108,13 +109,13 @@ button:disabled {
 
 .row label {
   font-size: 13px;
-  color: #b8c3d3;
+  color: var(--bb-skin-label);
 }
 
 select {
-  background: #1a1d22;
-  color: #f4f6f8;
-  border: 1px solid #2a2f37;
+  background: var(--bb-skin-btn-bg);
+  color: var(--bb-skin-text);
+  border: 1px solid var(--bb-skin-border);
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 13px;
@@ -124,8 +125,8 @@ select {
   padding: 8px 10px;
   border-radius: 6px;
   font-size: 12px;
-  background: #16191e;
-  border: 1px solid #232830;
+  background: var(--bb-skin-surface-muted);
+  border: 1px solid var(--bb-skin-status-border);
 }
 
 .status.ok { color: #7cffb0; }
@@ -134,7 +135,7 @@ select {
 
 .hint {
   font-size: 11px;
-  color: #6c7686;
+  color: var(--bb-skin-hint);
   line-height: 1.4;
 }
 
@@ -143,29 +144,29 @@ select {
   border: none;
   text-align: left;
   padding: 4px 0;
-  color: #98a3b3;
+  color: var(--bb-skin-muted);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   cursor: pointer;
 }
 
-.disclosure:hover { color: #f4f6f8; }
+.disclosure:hover { color: var(--bb-skin-text); }
 
 .advanced {
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  background: #14171c;
-  border: 1px solid #23272f;
+  background: var(--bb-skin-surface-alt);
+  border: 1px solid var(--bb-skin-border);
   border-radius: 8px;
 }
 
 .advanced .value {
   font-variant-numeric: tabular-nums;
   font-size: 12px;
-  color: #b8c3d3;
+  color: var(--bb-skin-label);
 }
 
 .keycaps {
@@ -180,20 +181,20 @@ select {
   font-size: 12px;
   font-weight: 600;
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
-  background: #1a1d22;
-  color: #f4f6f8;
-  border: 1px solid #2a2f37;
+  background: var(--bb-skin-btn-bg);
+  color: var(--bb-skin-text);
+  border: 1px solid var(--bb-skin-border);
   border-radius: 6px;
   text-align: center;
   cursor: pointer;
 }
 
-.keycap:hover { background: #20242b; }
+.keycap:hover { background: var(--bb-skin-btn-hover); }
 
 .keycap.capturing {
   background: #2a3550;
-  border-color: #4f8cff;
-  color: #b8d4ff;
+  border-color: var(--bb-skin-accent-solid);
+  color: var(--bb-skin-label);
 }
 
 .keycap.conflict {
@@ -203,11 +204,11 @@ select {
 
 input[type="range"] {
   width: 100%;
-  accent-color: #4f8cff;
+  accent-color: var(--bb-skin-accent-solid);
 }
 
 input[type="checkbox"] {
-  accent-color: #4f8cff;
+  accent-color: var(--bb-skin-accent-solid);
   width: 16px;
   height: 16px;
 }

@@ -15,8 +15,11 @@ import {
   loadBestScore,
   saveBestScore,
   DEFAULT_SETTINGS,
+  subscribeSettingsChange,
   type UserSettings,
 } from "@/utils/storage";
+import { applyDocumentSkin } from "@/ui/apply-skin";
+import { SKIN_IDS, SKIN_LABELS } from "@/ui/skins";
 
 // React's useEffect fires asynchronously after paint. postMessage from the
 // parent can arrive before the listener is registered, dropping BB_LOAD_CHART.
@@ -269,6 +272,23 @@ function MenuPanel({
         </div>
 
         <div className="menu-row">
+          <label htmlFor="m-skin">Skin</label>
+          <select
+            id="m-skin"
+            value={settings.skinId}
+            onChange={(e) =>
+              updateSetting("skinId", e.target.value as UserSettings["skinId"])
+            }
+          >
+            {SKIN_IDS.map((id) => (
+              <option key={id} value={id}>
+                {SKIN_LABELS[id]}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="menu-row">
           <label htmlFor="m-od">Timing (OD)</label>
           <select
             id="m-od"
@@ -464,6 +484,24 @@ function App() {
       window.removeEventListener("mouseup", onUp);
     };
   }, [dragging]);
+
+  // Skin from chrome.storage (+ live updates from the popup).
+  useEffect(() => {
+    async function syncSkinFromStorage() {
+      const s = await loadSettings();
+      applyDocumentSkin(s.skinId);
+      rendererRef.current?.syncLaneColorsFromCss();
+    }
+    void syncSkinFromStorage();
+    return subscribeSettingsChange(() => void syncSkinFromStorage());
+  }, []);
+
+  // Preview skin edits in the in-game menu before the user clicks Start.
+  useEffect(() => {
+    if (!menuOpen) return;
+    applyDocumentSkin(menuSettings.skinId);
+    rendererRef.current?.syncLaneColorsFromCss();
+  }, [menuOpen, menuSettings.skinId]);
 
   // Pause toggle from inside the iframe. The content script installs a
   // global P handler on the page window, but that only fires when focus
@@ -819,13 +857,17 @@ function App() {
   }
 
   function closeMenuWithoutApplying() {
-    // Cancel button on the menu. Re-applying mid-game without a regenerate
-    // is fine if the user only twiddled visual settings (opacity, sfx);
-    // those pick up on the next loop mount. If they changed bindings,
-    // they'll need to actually click Start to apply. Keep this behaviour
-    // simple: close and resume; the visual settings persist via storage.
-    setMenuOpen(false);
-    setErrorMsg(null);
+    // Discard menu edits by restoring the persisted skin palette (among
+    // other unstored fields loaded on next Start). Binding changes still
+    // need Start to regenerate; opacity/sfx previews without save follow
+    // the same rollback as appearance.
+    void (async () => {
+      const s = await loadSettings();
+      applyDocumentSkin(s.skinId);
+      rendererRef.current?.syncLaneColorsFromCss();
+      setMenuOpen(false);
+      setErrorMsg(null);
+    })();
   }
 
   async function startFromMenu() {
