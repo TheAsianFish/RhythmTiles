@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "beatbridge-backend"
-version = "0.1.0"
+version = "0.2.0"
 description = "BeatBridge backend. Audio analysis pipeline that returns Chart JSON."
 authors = [{ name = "Patrick Chung" }]
 requires-python = ">=3.11"
