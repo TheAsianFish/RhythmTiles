@@ -109,9 +109,14 @@ def _run_demucs(
     # apply_model wants shape (batch=1, channels=2, samples).
     tensor = torch.from_numpy(stereo).unsqueeze(0)
 
+    # CUDA when the installed torch wheel exposes a GPU. apply_model moves
+    # the model to the chosen device internally, so we don't .to() it here.
+    # Fallback is CPU; the user-visible cost is "minutes vs seconds" per
+    # MODELS.md.
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     with torch.no_grad():
         # `sources` shape: (batch, n_sources, channels, samples)
-        sources = apply_model(model, tensor, device="cpu", progress=False)
+        sources = apply_model(model, tensor, device=device, progress=False)
     sources_np = sources[0].cpu().numpy().astype(np.float32)
     # Average channels back to mono per source.
     mono_sources = sources_np.mean(axis=1)

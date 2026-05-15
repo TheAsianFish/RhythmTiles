@@ -46,23 +46,29 @@ if TYPE_CHECKING:
 # Absolute floor on hold duration regardless of beat math. A hold shorter
 # than this would feel like a normal tap during play.
 MIN_HOLD_S = 0.20
-# Absolute hard cap on hold duration even if the music has very slow beats.
-MAX_HOLD_S = 1.5
-# Beat-relative cap: a hold can be at most this many beats long. At 120 BPM
-# this gives 1.0s; at 172 BPM it gives ~0.7s; at 60 BPM it gives 2.0s
-# (further clamped by MAX_HOLD_S above).
-MAX_HOLD_BEATS = 2.0
+# Absolute hard cap on hold duration. Slightly above the original 1.5s so
+# obvious sustained phrases don't get chopped, but not the 2.5s of v0.5.0
+# which made holds dominate the chart.
+MAX_HOLD_S = 1.8
+# Beat-relative cap: a hold can be at most this many beats long. 2.5 is
+# just over the original 2.0 to allow occasional bar-spanning holds at
+# fast tempos, without v0.5.0's 4.0 that produced too many huge holds.
+MAX_HOLD_BEATS = 2.5
 # Beat-relative floor: a hold must be at least this many beats long. At
 # higher tempos this can be slightly shorter than MIN_HOLD_S, in which case
 # MIN_HOLD_S wins.
 MIN_HOLD_BEATS = 0.5
-# Fraction of the onset's peak RMS that the sustain must clear.
-SUSTAIN_THRESHOLD = 0.75
+# Fraction of the onset's peak RMS that the sustain must clear. 0.70 is
+# midway between the original 0.75 and the v0.5.0 0.60: we want vocals
+# that visibly fade to still count, but not so eager that any sustained
+# texture becomes a hold.
+SUSTAIN_THRESHOLD = 0.70
 # Cap total hold rate. Sorted by sustain duration descending; only the top
-# MAX_HOLD_RATIO of taps become holds, regardless of how many would otherwise
-# qualify. Real osu!mania charts run roughly 5-15% holds; we bias low so
-# charts feel mostly-taps with rare meaningful holds.
-MAX_HOLD_RATIO = 0.05
+# MAX_HOLD_RATIO of taps become holds. Original 0.05 had holds feel like a
+# rarity; v0.5.0 bumped to 0.18 and the user found that too slider-heavy.
+# 0.08 lands roughly in the middle - holds are present but stay subservient
+# to the tap stream.
+MAX_HOLD_RATIO = 0.08
 # Safety margin before the next same-lane note so the tail doesn't visually
 # overlap the next head.
 LANE_NEXT_SAFETY_S = 0.05

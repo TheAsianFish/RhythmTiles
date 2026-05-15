@@ -62,9 +62,8 @@ def test_assign_lanes_drops_when_all_lanes_too_recent() -> None:
 
 
 def test_shape_difficulty_thins_dense_input() -> None:
-    # 60 notes over 10s = 6 candidate/sec. Easy target 1.1 n/s ->
-    # ratio = 11/60 = 0.18 -> ~11 notes after selection. Allow a small
-    # window around that for floor/rounding effects.
+    # 60 notes over 10s = 6 candidate/sec. Easy target_mid ~1.16 n/s
+    # (v0.9.0: original bands x 1.05) -> ratio ~= 12/60 -> ~12 notes.
     beats = [0.0 + i * 0.5 for i in range(21)]
     notes = [
         RawNote(t=i * 0.166, lane=i % 4, strength=0.2 + (i % 5) * 0.15)
@@ -73,7 +72,7 @@ def test_shape_difficulty_thins_dense_input() -> None:
     shaped = shape_difficulty(
         notes=notes, difficulty="easy", beats=beats, song_duration_s=10.0,
     )
-    assert 8 <= len(shaped) <= 16, f"expected ~11 notes, got {len(shaped)}"
+    assert 8 <= len(shaped) <= 17, f"expected ~12 notes, got {len(shaped)}"
 
 
 def test_shape_difficulty_keeps_more_at_higher_difficulty() -> None:
@@ -127,19 +126,20 @@ def test_shape_difficulty_calibrates_per_song() -> None:
         f"not greater than dense ratio {dense_ratio:.2f}"
     )
     # The dense song has enough material to reach Easy's target band
-    # (0.7-1.5 n/s). The sparse song may fall BELOW the band because we
-    # never manufacture notes that aren't there: 50 candidates over 100s
-    # caps at 0.5 n/s no matter what ratio we pick. That's correct
-    # behaviour, not a bug.
+    # (v0.9.0: 0.74-1.58 n/s). The sparse song may fall BELOW the band
+    # because we never manufacture notes that aren't there: 50 candidates
+    # over 100s caps at 0.5 n/s no matter what ratio we pick. That's
+    # correct behaviour, not a bug.
     dense_rate = len(dense_easy) / duration
-    assert 0.7 <= dense_rate <= 1.8, f"dense rate out of band: {dense_rate}"
+    assert 0.7 <= dense_rate <= 1.7, f"dense rate out of band: {dense_rate}"
     # Sparse should keep nearly all of what's there since material is scarce.
     assert sparse_ratio >= 0.85, f"sparse should keep most of its scarce material: {sparse_ratio}"
 
 
 def test_shape_difficulty_sanity_caps_unplayable_bursts() -> None:
     # 20 notes packed into a single second (every 50ms) should be capped
-    # at 8 by the sanity rule, regardless of difficulty.
+    # at 8 by the sanity rule (v0.9.0 reverted to original), regardless
+    # of difficulty.
     beats = [0.0 + i * 0.5 for i in range(11)]
     notes = [RawNote(t=i * 0.05, lane=i % 4) for i in range(20)]
     shaped = shape_difficulty(notes=notes, difficulty="expert", beats=beats)
@@ -282,7 +282,7 @@ def test_hold_detect_caps_duration_to_beat_grid() -> None:
     t_axis = np.arange(int(sr * 5.0)) / sr
     y[:] = 0.5 * np.sin(2 * np.pi * 440 * t_axis).astype(np.float32)
 
-    # 120 BPM -> beat_period = 0.5s, MAX_HOLD_BEATS=2.0 -> max hold = 1.0s.
+    # 120 BPM -> beat_period = 0.5s, MAX_HOLD_BEATS=4.0 -> max hold = 2.0s.
     notes = [RawNote(t=0.5, lane=0)]
     beats = [0.5 * i for i in range(11)]  # beats every 0.5s out to 5.0s
     out = detect_holds(
@@ -295,9 +295,10 @@ def test_hold_detect_caps_duration_to_beat_grid() -> None:
     holds = [n for n in out if n.type == "hold"]
     assert len(holds) == 1
     assert holds[0].duration is not None
-    # Hard cap on hold duration is 2 beats = 1.0s. The snap may round to the
-    # nearest beat boundary so anything from ~0.5s to ~1.0s is acceptable.
-    assert 0.4 <= holds[0].duration <= 1.05, f"unexpected duration {holds[0].duration}"
+    # Hard cap on hold duration is 4 beats = 2.0s at this BPM. The snap
+    # may round to the nearest half-beat so anything from ~0.5s to ~2.05s
+    # is acceptable.
+    assert 0.4 <= holds[0].duration <= 2.05, f"unexpected duration {holds[0].duration}"
 
 
 def test_hold_detect_snaps_end_to_beat_grid() -> None:
@@ -352,8 +353,10 @@ def test_hold_detect_caps_total_hold_rate() -> None:
     notes = [RawNote(t=0.2 * i, lane=i % 4) for i in range(20)]
     out = detect_holds(notes=notes, y=y, sr=sr)
     hold_count = sum(1 for n in out if n.type == "hold")
-    # MAX_HOLD_RATIO = 0.08 -> at most max(1, int(20 * 0.08)) = 1 hold.
-    assert hold_count <= 2, f"too many holds: {hold_count}"
+    # MAX_HOLD_RATIO = 0.18 -> at most int(20 * 0.18) = 3 holds. The cap
+    # is the point of the test - we're verifying that even when every
+    # note would qualify, the global rate doesn't blow past the ceiling.
+    assert hold_count <= 4, f"too many holds: {hold_count}"
 
 
 def test_assign_lanes_breaks_same_hand_streak_on_stream() -> None:
@@ -537,12 +540,14 @@ def test_subdivision_augment_skips_silent_audio() -> None:
     assert len(out) == len(onsets)
 
 
-def test_beat_fill_preserves_short_empty_runs() -> None:
+def test_beat_fill_fills_single_beat_gaps() -> None:
     from app.pipeline.beat_fill import fill_empty_beats
     from app.pipeline.onset_detect import Onset
 
-    # 5 beats, with a single empty beat in the middle (beat 2). Short runs
-    # should NOT be filled - they're musical breaks.
+    # 5 beats, with a single empty beat in the middle (beat 2). After
+    # MIN_EMPTY_RUN_BEATS dropped to 1 in v0.6.0, single-beat gaps are
+    # filled too - leaving them empty produced perceptible dead spots
+    # in the chart.
     beats = [i * 0.5 for i in range(5)]
     onsets = [
         Onset(t=0.0, strength=1.0, centroid_hz=200.0),
@@ -551,7 +556,7 @@ def test_beat_fill_preserves_short_empty_runs() -> None:
         Onset(t=2.0, strength=1.0, centroid_hz=200.0),
     ]
     out = fill_empty_beats(onsets, beats)
-    assert len(out) == len(onsets), "1-beat empty run should not be filled"
+    assert len(out) == len(onsets) + 1, "single-beat gap should be filled with one synthetic onset"
 
 
 def test_stems_pass_through_when_demucs_disabled() -> None:

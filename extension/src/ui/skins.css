@@ -7,11 +7,10 @@
  *                      --bb-skin-page-bg / --bb-skin-elev-bg.
  *   --bb-skin-hud-text used by the overlay HUD body, .banner, and header
  *                      buttons. Sits on the dark video-overlay gradient
- *                      regardless of skin so dark skins can match the two
- *                      and the Pro / "white" skin can keep the HUD readable
- *                      while making cards light-themed.
- * For every dark-themed skin, both variables hold the same value. Only the
- * Pro skin (light cards on a dark HUD) splits them apart.
+ *                      regardless of skin. Split from --bb-skin-text so
+ *                      light-themed skins can keep the HUD readable while
+ *                      making cards light. For dark-themed skins both
+ *                      variables hold the same value.
  */
 :root {
   color-scheme: dark;
@@ -345,68 +344,68 @@
 }
 
 /*
- * Pro: osu! "white skin" aesthetic. Inspired by community-favorite
- * minimal/flat skins (see references in PR description). Two design
- * principles that drive the palette:
- *
- *   1. CARDS ARE FLAT WHITE. The popup, in-overlay menu card, and
- *      calibration page use a uniform near-white surface (not a gradient).
- *      The previous version's charcoal-to-near-white gradient produced
- *      "light text on light end of the gradient" unreadable regions.
- *   2. HUD STAYS DARK. The video-overlay panel sits on top of arbitrary
- *      YouTube content, where a white panel would compete with the video
- *      and the dark notes would have poor contrast. The HUD keeps its
- *      dark gradient and uses --bb-skin-hud-text (light) for any in-HUD
- *      copy. Everything that lives on a card uses --bb-skin-text (dark).
- *
- * Accent: a single muted slate. osu! minimal skins typically pick one
- * subtle hue + grayscale for everything else; we use #5b6478 for the
- * primary button, focus ring, and active calibration dot.
+ * Pro: osu! minimal grayscale. Cards use a subtle dark-gray gradient
+ * (charcoal to mid-gray) so they read as one cohesive surface without
+ * the harsh light end the original gradient had. Text stays light and
+ * is readable across the whole gradient. HUD stays dark for note
+ * contrast over YouTube video. Accent is a single muted slate.
  */
 :root[data-bb-skin="pro"] {
-  color-scheme: light;
+  color-scheme: dark;
 
-  /* Popup chrome: uniform off-white. Slight warm bias so it doesn't read
-     as institutional gray; matches the off-white seen in popular osu
-     minimal skins like "Minimal" by easy-osu. */
-  --bb-skin-page-bg: #f5f6f9;
+  /* Popup chrome: charcoal to mid-gray. Stays in dark territory so
+     light text never lands on a pale band. */
+  --bb-skin-page-bg: linear-gradient(
+    165deg,
+    #16181c 0%,
+    #1f2127 45%,
+    #2a2d34 80%,
+    #353841 100%
+  );
 
-  /* Calibration tab. Same palette as the popup. */
-  --bb-skin-cal-body-bg: #f5f6f9;
+  /* Calibration tab shares the gradient (see calibration.css fallback). */
+  --bb-skin-cal-body-bg: linear-gradient(
+    165deg,
+    #16181c 0%,
+    #1f2127 45%,
+    #2a2d34 80%,
+    #353841 100%
+  );
 
-  /* Card-context text (popup body, menu card, results card, calibration). */
-  --bb-skin-text: #1a1d22;
-  /* HUD-context text (banner, header buttons, anywhere over the dark
-     video-overlay gradient). Stays light. */
+  --bb-skin-text: #eaebf0;
   --bb-skin-hud-text: #eaebf0;
-  --bb-skin-muted: #5a5f6a;
-  --bb-skin-label: #3a3e47;
-  --bb-skin-hint: #7a7f8a;
-  --bb-skin-border: #dadce3;
+  --bb-skin-muted: #afb3be;
+  --bb-skin-label: #cdd0da;
+  --bb-skin-hint: #8f939e;
+  --bb-skin-border: rgba(255, 255, 255, 0.12);
 
-  --bb-skin-btn-bg: #ebedf2;
-  --bb-skin-btn-hover: #dee1e8;
-  --bb-skin-surface-alt: #ffffff;
-  --bb-skin-surface-muted: #f0f1f5;
+  --bb-skin-btn-bg: rgba(255, 255, 255, 0.06);
+  --bb-skin-btn-hover: rgba(255, 255, 255, 0.1);
+  --bb-skin-surface-alt: rgba(10, 10, 12, 0.45);
+  --bb-skin-surface-muted: rgba(12, 12, 14, 0.5);
 
-  --bb-skin-accent-a: #6f7a92;
-  --bb-skin-accent-b: #4d5670;
-  --bb-skin-accent-border: #4d5670;
-  --bb-skin-accent-solid: #5b6478;
-  --bb-skin-menu-accent: #5b6478;
+  --bb-skin-accent-a: #8e929d;
+  --bb-skin-accent-b: #5e626c;
+  --bb-skin-accent-border: #6a6f7a;
+  --bb-skin-accent-solid: #a3a8b5;
+  --bb-skin-menu-accent: #b8bcc8;
 
-  --bb-skin-cal-radial-mid: #ebedf2;
-  --bb-skin-cal-radial-edge: #f5f6f9;
-  --bb-skin-cal-card-bg: #ffffff;
+  --bb-skin-cal-radial-mid: #25272d;
+  --bb-skin-cal-radial-edge: #16181c;
+  --bb-skin-cal-card-bg: linear-gradient(
+    180deg,
+    rgba(22, 24, 28, 0.94) 0%,
+    rgba(34, 36, 42, 0.92) 100%
+  );
 
-  --bb-skin-cal-dot-off: #d4d7df;
-  --bb-skin-cal-dot-on: #5b6478;
+  --bb-skin-cal-dot-off: #3a3c44;
+  --bb-skin-cal-dot-on: #e4e6ed;
 
-  --bb-skin-cal-tap-dash: #c0c4cd;
-  --bb-skin-cal-tap-dash-armed-border: #5b6478;
-  --bb-skin-cal-tap-dash-armed-text: #1a1d22;
+  --bb-skin-cal-tap-dash: rgba(255, 255, 255, 0.24);
+  --bb-skin-cal-tap-dash-armed-border: #c9cdd8;
+  --bb-skin-cal-tap-dash-armed-text: #f2f4f9;
 
-  --bb-skin-status-border: #dadce3;
+  --bb-skin-status-border: rgba(255, 255, 255, 0.1);
 
   /* HUD body: stays dark. Notes need contrast against the YouTube video
      and the panel needs to read as game-chrome, not as part of the page. */
@@ -421,7 +420,6 @@
   --bb-skin-header-grip: rgba(235, 236, 240, 0.45);
   --bb-skin-title: rgba(238, 240, 245, 0.78);
 
-  /* Difficulty chip sits on the dark header. Light text. */
   --bb-skin-chip-diff-bg: rgba(255, 255, 255, 0.1);
   --bb-skin-chip-diff-border: rgba(255, 255, 255, 0.28);
   --bb-skin-chip-diff-text: rgba(246, 247, 250, 0.95);
@@ -430,22 +428,25 @@
 
   --bb-skin-results-scrim: rgba(0, 0, 0, 0.55);
 
-  /* In-overlay menu card: uniform white, sits on top of the dark HUD
-     gradient via the menu-overlay scrim. Dark text on this card. */
-  --bb-skin-elev-bg: #ffffff;
-  --bb-skin-elev-border: #dadce3;
+  /* In-overlay menu card: same subtle gradient, slightly lifted off the
+     page background so it reads as elevated. */
+  --bb-skin-elev-bg: linear-gradient(
+    178deg,
+    #1d1f24 0%,
+    #262931 60%,
+    #353841 100%
+  );
+  --bb-skin-elev-border: rgba(255, 255, 255, 0.14);
 
-  --bb-skin-menu-select-bg: #ebedf2;
-  --bb-skin-menu-select-border: #c8cbd3;
+  --bb-skin-menu-select-bg: rgba(20, 21, 24, 0.55);
+  --bb-skin-menu-select-border: rgba(255, 255, 255, 0.18);
 
-  --bb-skin-menu-primary-bg-a: #5b6478;
-  --bb-skin-menu-primary-border: #4d5670;
-  --bb-skin-menu-primary-text: #ffffff;
+  --bb-skin-menu-primary-bg-a: rgba(200, 204, 214, 0.18);
+  --bb-skin-menu-primary-border: rgba(230, 232, 240, 0.35);
+  --bb-skin-menu-primary-text: #f8f9fc;
 
-  /* Menu actions: faint gray buttons on the white card instead of
-     "translucent white" which would disappear on the white background. */
-  --bb-skin-menu-btn-bg: #f0f1f5;
-  --bb-skin-menu-btn-border: #c8cbd3;
+  --bb-skin-menu-btn-bg: rgba(255, 255, 255, 0.06);
+  --bb-skin-menu-btn-border: rgba(255, 255, 255, 0.14);
 
   /* Lane fills: same neutral gray on both pairs, matching osu! minimal
      hit-circle convention. Reads cleanly against the dark HUD. */

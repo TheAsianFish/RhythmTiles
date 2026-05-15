@@ -451,53 +451,28 @@ canvas {
   opacity: 0.55;
 }
 
-/* Pro skin: mute backend pills to grayscale so they match washed UI. */
+/* Pro skin: desaturate backend pills to grayscale so they match the
+   minimal palette. Light text on dark gradient. */
 :root[data-bb-skin="pro"] .mode-chip-ok {
-  background: rgba(110, 116, 128, 0.12);
-  border-color: rgba(110, 116, 128, 0.32);
-  color: #585c66;
+  background: rgba(200, 204, 214, 0.1);
+  border-color: rgba(200, 204, 214, 0.28);
+  color: #c8ccd6;
 }
 
 :root[data-bb-skin="pro"] .mode-chip-warn {
-  background: rgba(110, 116, 128, 0.16);
-  border-color: rgba(90, 95, 108, 0.4);
-  color: #4a4d56;
+  background: rgba(200, 204, 214, 0.14);
+  border-color: rgba(200, 204, 214, 0.34);
+  color: #d4d8e0;
 }
 
 :root[data-bb-skin="pro"] .mode-chip-error {
-  background: rgba(105, 92, 92, 0.14);
-  border-color: rgba(120, 100, 100, 0.38);
-  color: #5c4f4f;
+  background: rgba(220, 160, 160, 0.12);
+  border-color: rgba(220, 160, 160, 0.34);
+  color: #e6c5c5;
 }
 
 :root[data-bb-skin="pro"] .mode-chip-neutral {
-  background: rgba(110, 116, 128, 0.08);
-  border-color: rgba(110, 116, 128, 0.22);
-  color: #6a6f7a;
-}
-
-/* Pro skin: the menu card and results card are flat white. Inner
-   children that hardcoded blue/red tints (loading-progress, popup-
-   progress, menu-error) need their colors flipped to dark text +
-   subtle tinted background so they remain readable on white. The
-   previous version's heavy text-shadows were a band-aid for the
-   gradient era and are removed - the new uniform card needs no
-   shadow tricks for legibility. */
-
-:root[data-bb-skin="pro"] .loading-progress {
-  background: rgba(91, 100, 120, 0.06);
-  border-color: rgba(91, 100, 120, 0.25);
-  color: #3a3e47;
-}
-
-:root[data-bb-skin="pro"] .loading-progress-warn {
-  background: rgba(196, 138, 50, 0.10);
-  border-color: rgba(196, 138, 50, 0.35);
-  color: #6b4d1f;
-}
-
-:root[data-bb-skin="pro"] .menu-error {
-  background: rgba(180, 30, 30, 0.08);
-  border-color: rgba(180, 30, 30, 0.32);
-  color: #8a1f1f;
+  background: rgba(200, 204, 214, 0.08);
+  border-color: rgba(200, 204, 214, 0.2);
+  color: #b2b6c0;
 }

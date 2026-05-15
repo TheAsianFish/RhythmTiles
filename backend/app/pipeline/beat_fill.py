@@ -33,9 +33,14 @@ if TYPE_CHECKING:
 # the beat as covered. 100ms is roughly an eighth note at 150 BPM.
 BEAT_TOLERANCE_S = 0.10
 
-# Don't fill short empty runs. Musical breaks are real and shouldn't be
-# papered over with synthetic notes.
-MIN_EMPTY_RUN_BEATS = 2
+# Empty-beat fill threshold. Originally 2 so genuine musical breaks
+# (1-beat rests in a phrase) stayed empty. Lowered to 1 in v0.6.0 so
+# every isolated empty beat gets a synthetic onset - in practice the
+# chart had perceptible gaps where a kick missed or a vocal phrase had
+# a rest, and the player wants steady forward motion. Long rests
+# (full bars of silence) still produce empty stretches because the
+# music truly has no onsets there.
+MIN_EMPTY_RUN_BEATS = 1
 
 # Synthetic onsets get strength below the chord-quantile threshold so they
 # never become chords or anchors.
@@ -58,21 +63,24 @@ SUBDIV_DEDUPE_S = 0.060
 
 # Per-difficulty subdivision behaviour. Subdivisions feed the difficulty
 # selector with more candidates; the selector then keeps a fraction of
-# them based on score. Reduced aggression here so the candidate pool
-# doesn't dominate and force button-mashing density.
-#  - Hard: half-beats only in dense sections (current beat already has
-#    a real onset).
-#  - Expert: half-beats freely + quarter-beats only inside crescendos.
+# them based on score.
+#  - Hard: half-beats in dense sections + half-beats forced in chorus
+#    (bucket-2) sections so ranked-mania-style streams land at the
+#    music's peaks.
+#  - Expert: half-beats everywhere + quarter-beats in crescendos and
+#    in chorus sections (the "fast and busy" ramps the player wants).
 _SUBDIV_BY_DIFFICULTY = {
-    "easy":   {"halves_everywhere": False, "halves_in_dense": False, "quarters_in_crescendo": False},
-    "normal": {"halves_everywhere": False, "halves_in_dense": False, "quarters_in_crescendo": False},
-    "hard":   {"halves_everywhere": False, "halves_in_dense": True,  "quarters_in_crescendo": False},
-    "expert": {"halves_everywhere": True,  "halves_in_dense": True,  "quarters_in_crescendo": True},
+    "easy":   {"halves_everywhere": False, "halves_in_dense": False, "halves_in_chorus": False, "quarters_in_crescendo": False, "quarters_in_chorus": False},
+    "normal": {"halves_everywhere": False, "halves_in_dense": False, "halves_in_chorus": False, "quarters_in_crescendo": False, "quarters_in_chorus": False},
+    "hard":   {"halves_everywhere": False, "halves_in_dense": True,  "halves_in_chorus": True,  "quarters_in_crescendo": False, "quarters_in_chorus": False},
+    "expert": {"halves_everywhere": True,  "halves_in_dense": True,  "halves_in_chorus": True,  "quarters_in_crescendo": True,  "quarters_in_chorus": True},
 }
 
-# Crescendo detection. A "rising" beat-pair has RMS increase by at least this
-# fraction over the previous beat; a crescendo is MIN_CRESCENDO_BEATS or
-# more consecutive rising beats.
+# Crescendo detection. A "rising" beat-pair has RMS increase by at least
+# this fraction over the previous beat; a crescendo is MIN_CRESCENDO_BEATS
+# or more consecutive rising beats. v0.5.0 tried 4%/2 to escalate builds
+# harder; this leaked into ML-light and produced over-augmented runs.
+# Back to the original 7%/3-beat thresholds in v0.6.0.
 CRESCENDO_RISE_FRACTION = 0.07
 MIN_CRESCENDO_BEATS = 3
 
@@ -186,6 +194,7 @@ def add_subdivision_onsets(
     sr: int,
     difficulty: str,
     hop_length: int = 512,
+    chorus_beat_indices: set[int] | None = None,
 ) -> list[Onset]:
     """Insert half-beat / quarter-beat subdivisions where audio supports them.
 
@@ -196,8 +205,14 @@ def add_subdivision_onsets(
     permits.
 
     Crescendos (rising RMS over MIN_CRESCENDO_BEATS+ beats) get half-beat
-    subdivisions regardless of difficulty, since the user's intuition that
-    "build to a chorus = more notes" is musically right at any tier.
+    subdivisions regardless of difficulty, since "build to a chorus = more
+    notes" is musically right at any tier.
+
+    `chorus_beat_indices` (from MERT bucket-2 sections, computed by the
+    caller) marks beats inside high-energy sections. At Hard+ those beats
+    get forced half-beat subdivisions; at Expert they also get quarter-
+    beats. This is what makes choruses feel like the "fast and busy"
+    moments of a ranked osu!mania chart instead of just slightly denser.
     """
     rules = _SUBDIV_BY_DIFFICULTY.get(difficulty)
     if rules is None or len(beats) < 2:
@@ -214,6 +229,7 @@ def add_subdivision_onsets(
     threshold = max(median_rms * SUBDIV_RMS_THRESHOLD, SUBDIV_ABSOLUTE_RMS_FLOOR)
 
     onset_times = sorted(o.t for o in onsets)
+    chorus = chorus_beat_indices or set()
 
     # Per-beat onset density count, for "dense section" detection.
     real_per_beat = _onsets_per_beat(beats=beats, onset_times=onset_times)
@@ -228,20 +244,22 @@ def add_subdivision_onsets(
         midpoint = 0.5 * (beat_a + beat_b)
 
         in_crescendo = i in crescendo_beats
+        in_chorus = i in chorus
         in_dense_section = (
             i > 0
             and real_per_beat[i] >= 1
             and real_per_beat[i - 1] >= 1
         )
 
-        # Half-beat subdivision rule. Three gates from least to most
-        # restrictive:
+        # Half-beat subdivision rule. Gates from least to most restrictive:
         #  - halves_everywhere: anywhere with audio support (Expert)
         #  - halves_in_dense:   only where surrounding beats have onsets (Hard)
+        #  - halves_in_chorus:  forced inside MERT bucket-2 sections (Hard+)
         #  - in_crescendo:      forced on rising-energy sections regardless
         place_half = (
             rules["halves_everywhere"]
             or (rules["halves_in_dense"] and in_dense_section)
+            or (rules["halves_in_chorus"] and in_chorus)
             or in_crescendo
         )
         if place_half:
@@ -254,9 +272,14 @@ def add_subdivision_onsets(
                 centroid=SYNTH_CENTROIDS[i % 2],
             )
 
-        # Quarter-beat subdivisions only inside crescendos for Expert.
-        # The selector + sanity cap will trim if too many land in a row.
-        if rules["quarters_in_crescendo"] and in_crescendo:
+        # Quarter-beat subdivisions: inside crescendos (Expert) AND inside
+        # chorus sections (Expert). Selector + sanity cap will trim runs
+        # that violate the 8 notes/sec ceiling.
+        wants_quarters = (
+            (rules["quarters_in_crescendo"] and in_crescendo)
+            or (rules["quarters_in_chorus"] and in_chorus)
+        )
+        if wants_quarters:
             q1 = beat_a + 0.25 * (beat_b - beat_a)
             q3 = beat_a + 0.75 * (beat_b - beat_a)
             _maybe_add(

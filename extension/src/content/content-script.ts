@@ -14,13 +14,15 @@ const OVERLAY_ID = "beatbridge-overlay-root";
 const CLOCK_TICK_MS = 16;
 
 // Panel geometry. Sits on the right side of the YouTube viewport, descending
-// from below the top nav bar so the video stays unobstructed. Width and max
-// height are capped so the panel reads as a floating widget rather than a
-// full-screen takeover. Taller panel (~20% vs the 620/420 caps) gives more
-// pixels of runway above the hit line so notes are on-screen longer at 1x speed.
+// from below the top nav bar so the video stays unobstructed. Width capped
+// so the panel reads as a floating widget rather than a full-screen takeover.
+// v0.7.0 bumped MAX_HEIGHT 744 -> 900 and MIN_HEIGHT 504 -> 640 so notes
+// have more runway above the hit line. v0.9.x bumped MAX_HEIGHT to 1000
+// (on viewports too short for 1000, the Math.min clamp lets it shrink to
+// the available space without forcing scroll).
 const PANEL_WIDTH = 320;
-const PANEL_MAX_HEIGHT = 744;
-const PANEL_MIN_HEIGHT = 504;
+const PANEL_MAX_HEIGHT = 1000;
+const PANEL_MIN_HEIGHT = 640;
 const PANEL_MARGIN_RIGHT = 24;
 const PANEL_MARGIN_TOP = 72;
 const PANEL_MARGIN_BOTTOM = 24;
@@ -57,6 +59,28 @@ let bindingsUnsubscribe: (() => void) | null = null;
 const pageHeldCodes = new Set<string>();
 let keyDownHandler: ((ev: KeyboardEvent) => void) | null = null;
 let keyUpHandler: ((ev: KeyboardEvent) => void) | null = null;
+
+// Debounce for video play/pause toggles. Both the page-level KeyP keydown
+// handler (this file) AND the overlay iframe's keydown handler can fire on
+// the same physical keypress depending on focus, and either can route
+// through here. Without a guard, two toggles within a few ms would pause
+// then immediately replay - the second play triggers scheduleCountdown in
+// the overlay, which is the "stay paused, resume on next press" bug.
+// 250ms is well below human double-tap intent so it doesn't swallow real
+// double-presses.
+const TOGGLE_DEBOUNCE_MS = 250;
+let lastToggleAt = 0;
+function requestVideoToggle(): void {
+  if (!videoEl) return;
+  const now = performance.now();
+  if (now - lastToggleAt < TOGGLE_DEBOUNCE_MS) return;
+  lastToggleAt = now;
+  if (videoEl.paused || videoEl.ended) {
+    void videoEl.play().catch(() => {});
+  } else {
+    videoEl.pause();
+  }
+}
 
 function findVideoElement(): HTMLVideoElement | null {
   const v = document.querySelector("video.html5-main-video") as HTMLVideoElement | null;
@@ -137,16 +161,14 @@ function attachKeyCapture() {
     // own P shortcut (picture-in-picture) doesn't also fire. The video's
     // play/pause events round-trip through onPlay/onPause below, and the
     // overlay's BB_VIDEO_PLAYING handler runs the 3-2-1 countdown on resume.
-    // Only intercept if the user hasn't rebound KeyP to a lane.
+    // Only intercept if the user hasn't rebound KeyP to a lane. Routes
+    // through requestVideoToggle so the debounce there merges this with any
+    // BB_REQUEST_VIDEO_TOGGLE the iframe might post for the same keypress.
     if (ev.code === "KeyP" && !boundCodes.has("KeyP") && overlay && videoEl) {
       ev.preventDefault();
       ev.stopImmediatePropagation();
       if (ev.repeat) return;
-      if (videoEl.paused || videoEl.ended) {
-        void videoEl.play().catch(() => {});
-      } else {
-        videoEl.pause();
-      }
+      requestVideoToggle();
       return;
     }
     if (!boundCodes.has(ev.code)) return;
@@ -556,13 +578,11 @@ window.addEventListener("message", (ev) => {
       // Posted by the overlay's P-key handler. The overlay can't reach the
       // page's <video> directly, so it asks us to flip state. Resume from
       // pause round-trips back as BB_VIDEO_PLAYING which triggers the
-      // existing 3-2-1 countdown on the overlay side.
-      if (!videoEl) break;
-      if (videoEl.paused || videoEl.ended) {
-        void videoEl.play().catch(() => {});
-      } else {
-        videoEl.pause();
-      }
+      // existing 3-2-1 countdown on the overlay side. Routed through the
+      // same debounced helper as the page-level keydown so a single
+      // physical keypress that fires BOTH handlers still produces a
+      // single toggle.
+      requestVideoToggle();
       break;
     case "BB_REQUEST_VIDEO_SEEK":
       // Posted by the overlay's Replay button (and any future "jump to

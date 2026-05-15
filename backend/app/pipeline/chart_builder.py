@@ -65,18 +65,15 @@ _DIFFICULTY_TUNING = {
     # chord groups, tuned together with the centroid threshold. Was
     # 0.98-0.90 (too few chords); these widen the strength gate so the
     # centroid gate becomes the dominant filter.
-    # hold_ratio cut roughly in half across all tiers. Sliders were stacking
-    # too thickly through sustained vocal regions and felt like a different
-    # instrument from the tap stream. Keeping them rare makes each one read
-    # as a deliberate musical moment rather than ambient noise.
-    # Wider quantile spread between Hard and Expert so Expert visibly has
-    # more chord stacks (and feels distinct from Hard), matching the n/s
-    # band separation in difficulty.TARGET_NOTES_PER_SEC. Easy/Normal
-    # unchanged: their tier separation comes mostly from the n/s band.
-    "easy":   {"chord_quantile": 0.97, "hold_ratio": 0.01},
-    "normal": {"chord_quantile": 0.94, "hold_ratio": 0.025},
-    "hard":   {"chord_quantile": 0.89, "hold_ratio": 0.04},
-    "expert": {"chord_quantile": 0.84, "hold_ratio": 0.07},
+    # hold_ratio: target fraction of notes that are holds. v0.5.0 tried
+    # ranked-LN levels (4%/8%/14%/20%) and slider density overwhelmed
+    # the tap stream. Current values are roughly 1.5x the original
+    # (which was 1%/2.5%/4%/7%) - holds are present and meaningful but
+    # don't take over.
+    "easy":   {"chord_quantile": 0.97, "hold_ratio": 0.015},
+    "normal": {"chord_quantile": 0.94, "hold_ratio": 0.035},
+    "hard":   {"chord_quantile": 0.89, "hold_ratio": 0.06},
+    "expert": {"chord_quantile": 0.84, "hold_ratio": 0.10},
 }
 
 
@@ -119,26 +116,6 @@ def _energy_buckets_for_notes(
         else:
             buckets.append(1)
     return buckets
-
-
-def _energy_buckets_from_sections(
-    *,
-    notes,
-    sections: list[ml_sections.LabeledSection],
-) -> list[int]:
-    """Bucket each note by which MERT-derived section it sits in.
-
-    Compared to the RMS path: sections give sharp boundaries (chorus
-    starts THERE, not "gradually around there"), and MERT clustering
-    catches vocal-driven choruses that RMS alone misses on songs with
-    quiet drums under loud vocals.
-    """
-    if not notes:
-        return []
-    times = [float(n.t) for n in notes]
-    return ml_sections.buckets_for_note_times(
-        note_times_s=times, sections=sections,
-    )
 
 
 def _compute_mert_sections(
@@ -348,12 +325,31 @@ def build_chart_from_audio(
             "beat-grid fill added %d synthetic onsets to cover empty runs",
             len(onsets) - onsets_before_fill,
         )
+    # MERT sections: compute up-front so we can pass chorus-beat indices
+    # to the subdivision augmenter (which fires denser patterns inside
+    # bucket-2 sections at Hard+). Same result is reused below for the
+    # per-note energy bucketing and the wire-format sections array.
+    mert_sections: list[ml_sections.LabeledSection] = []
+    if use_mert_eff and mert.is_available():
+        mert_sections = _compute_mert_sections(
+            y=y, sr=sr, content_hash=content_hash,
+        )
+
+    chorus_beats: set[int] = set()
+    if mert_sections:
+        for idx, b in enumerate(beat_info.beats):
+            if ml_sections.bucket_at(b, mert_sections) == 2:
+                chorus_beats.add(idx)
+
     # Subdivision augmentation: insert half-beat (Hard/Expert) and
     # quarter-beat (Expert in dense sections) candidates plus crescendo
     # subdivisions so the thinner has material to keep at higher tiers.
+    # Chorus-beat indices from MERT route extra subdivisions into the
+    # peaks of the song where ranked-mania charts go busy.
     onsets_before_subdiv = len(onsets)
     onsets = add_subdivision_onsets(
         onsets, beat_info.beats, y=y, sr=sr, difficulty=difficulty,
+        chorus_beat_indices=chorus_beats or None,
     )
     if len(onsets) != onsets_before_subdiv:
         logger.info(
@@ -376,25 +372,16 @@ def build_chart_from_audio(
         # accent gate it has always used.
         downbeats=beat_info.downbeats,
     )
-    # Energy bucket source: MERT-derived sections when the flag is on
-    # AND the model produces a usable result; RMS heuristic otherwise.
-    # The thinner's _ENERGY_MULT applies the same way to both - section
-    # buckets just give sharper boundaries between verse and chorus.
-    mert_sections: list[ml_sections.LabeledSection] = []
-    if use_mert_eff and mert.is_available():
-        mert_sections = _compute_mert_sections(
-            y=y, sr=sr, content_hash=content_hash,
-        )
-    if mert_sections:
-        energy_buckets = _energy_buckets_from_sections(
-            notes=raw_notes, sections=mert_sections,
-        )
-        logger.info(
-            "energy buckets sourced from MERT (%d sections)",
-            len(mert_sections),
-        )
-    else:
-        energy_buckets = _energy_buckets_for_notes(notes=raw_notes, y=y, sr=sr)
+    # Energy buckets always come from the per-note RMS curve. The MERT
+    # section bucketing we tried (one bucket per labeled section) skews
+    # heavily when section count is low: with K=4 and q33/q67 across only
+    # 3-6 per-section RMS means, one whole verse can land in bucket 0 and
+    # the _ENERGY_MULT 0.90 discount strips its notes during top-K
+    # thinning, leaving long blank stretches. The per-note RMS path keeps
+    # bucket assignment smooth across the song so verses stay alive.
+    # MERT still contributes via chorus_beat_indices above (subdivision
+    # routing into bucket-2 sections) and the wire-format sections below.
+    energy_buckets = _energy_buckets_for_notes(notes=raw_notes, y=y, sr=sr)
     thinned = shape_difficulty(
         notes=raw_notes,
         difficulty=difficulty,

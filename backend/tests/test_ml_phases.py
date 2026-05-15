@@ -537,10 +537,11 @@ def test_explicit_use_beat_this_false_forces_librosa_path() -> None:
         os.environ["USE_BEAT_THIS"] = "0"
 
 
-def test_beat_fill_fills_short_empty_run_at_downbeat() -> None:
-    """Single empty beat is normally preserved as a musical break, but a
-    single empty DOWNBEAT must still be filled - a bar start is too
-    important to leave dead even if the run is short.
+def test_beat_fill_fills_empty_downbeat() -> None:
+    """A single empty DOWNBEAT must be filled. Bar starts are too
+    important to leave dead. After v0.6.0 every empty beat gets filled
+    regardless of run length, so the downbeat-specific path is now
+    redundant with the generic fill, but the invariant still holds.
     """
     from app.pipeline.beat_fill import fill_empty_beats
 
@@ -552,11 +553,6 @@ def test_beat_fill_fills_short_empty_run_at_downbeat() -> None:
         Onset(t=1.5, strength=1.0, centroid_hz=200.0),  # gap at t=1.0
         Onset(t=2.0, strength=1.0, centroid_hz=200.0),
     ]
-
-    # Without downbeats: the 1-beat run is preserved (matches the
-    # existing test_beat_fill_preserves_short_empty_runs behaviour).
-    out_no_db = fill_empty_beats(onsets, beats)
-    assert len(out_no_db) == len(onsets)
 
     # With t=1.0 marked as a downbeat: the gap gets a synthetic onset.
     out_with_db = fill_empty_beats(onsets, beats, downbeats=[1.0])

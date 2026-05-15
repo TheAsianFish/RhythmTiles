@@ -44,15 +44,24 @@ _DENSITY_TARGETS = {
 #  - Hard 5.0-6.8 and Expert 5.8-7.6 then OVERLAPPED by 1 n/s, so the
 #    per-song calibrator landed them at nearly identical ratios on most
 #    songs. Playtesting confirmed tiers felt indistinguishable.
-#  - Current values: NO band overlap. Each tier's mid-point is roughly
-#    1.5-2 n/s above the previous. Combined with the chord_quantile
-#    spread (see _DIFFICULTY_TUNING in chart_builder), Expert plays
-#    visibly denser and more chord-heavy than Hard.
+#  - Pre-v0.7.0 bands (0.7-1.5 / 2.5-3.8 / 4.6-5.9 / 6.3-7.8) felt
+#    lackluster compared to actual osu!mania ranked charts where even
+#    Beginner runs 1.5-2.5 NPS and Insane hits 7-10. The runway is also
+#    longer in osu!mania so more notes fit on screen.
+#  - v0.7.0 bumped all tiers to roughly match osu!mania difficulty
+#    progression. Easy mid 1.1 -> 2.0 nps doubled the density and
+#    felt too hard for auto-generated charts (no human pattern intent
+#    to offset the density). v0.8.0 pulled back halfway but still
+#    felt too hard, especially because the Easy bump was the largest.
+#  - v0.9.0 reverts to the ORIGINAL bands times a uniform 1.05
+#    across all tiers. Just a nudge - the runway bump (overlay panel
+#    744->900) does most of the user-facing "feels more responsive"
+#    work; density barely moves.
 TARGET_NOTES_PER_SEC = {
-    "easy":   (0.7, 1.5),     # mid 1.1  - sparse, on-beat fills only
-    "normal": (2.5, 3.8),     # mid 3.15 - one note per beat-ish
-    "hard":   (4.6, 5.9),     # mid 5.25 - half-beats fill in dense sections
-    "expert": (6.3, 7.8),     # mid 7.05 - approaches the sanity cap of 8/s
+    "easy":   (0.74, 1.58),   # mid 1.16  - original 1.1 mid x 1.05
+    "normal": (2.63, 3.99),   # mid 3.31  - original 3.15 mid x 1.05
+    "hard":   (4.83, 6.20),   # mid 5.51  - original 5.25 mid x 1.05
+    "expert": (6.62, 8.19),   # mid 7.40  - original 7.05 mid x 1.05
 }
 
 # Absolute bounds on the derived ratio so degenerate inputs (tiny or huge
@@ -61,15 +70,23 @@ _MIN_RATIO = 0.05
 _MAX_RATIO = 0.98
 
 # Energy-bucket bonus to keep_score: low energy verse notes get a small
-# discount, chorus notes get a small boost. Subtle so it complements
-# strength rather than overriding it.
+# discount, chorus notes get a small boost. The multiplier biases WHICH
+# notes survive global thinning rather than HOW MANY survive per section.
+# Subtle by design - off-beat phrasing notes need to survive thinning
+# for the chart to feel like it has flow.
+#
+# History:
+#  - v0.3.0 tried per-bucket thinning with a 0.65/1.30 split. Stripped
+#    verses to their predictable downbeats. Reverted.
+#  - v0.5.0 widened the range to 0.80/1.30. Made ML-light worse along
+#    with ML-max (the RMS path also uses these). Reverted in v0.6.0.
 _ENERGY_MULT = (0.90, 1.00, 1.15)
 
 # Sanity cap: no more than this many notes inside any sliding window of
 # SANITY_WINDOW_S seconds. Drops the lowest-strength notes in over-dense
-# windows. 8 notes/sec is roughly osu!mania "Insane" peak density across
-# four lanes (2 notes/sec per hand) and the upper bound of sustained play
-# even for skilled players.
+# windows. Reverted to original 8 in v0.9.0 alongside the density pull-back.
+# 8/s is roughly osu!mania "Insane" peak density across four lanes
+# (2 notes/sec per hand) and the upper bound of sustained play.
 SANITY_NOTES_PER_WINDOW = 8
 SANITY_WINDOW_S = 1.0
 
