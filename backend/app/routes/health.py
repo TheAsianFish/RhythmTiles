@@ -6,7 +6,7 @@ from fastapi import APIRouter
 
 from app import __version__
 from app.config import settings
-from app.ml import beat_this, mert
+from app.ml import beat_this, learned_lanes, mert
 
 router = APIRouter(tags=["health"])
 
@@ -45,5 +45,9 @@ async def healthz() -> dict[str, object]:
             "demucsFlag": settings.use_demucs,
             "mertFlag": settings.use_mert,
             "mertActive": settings.use_mert and mert.is_available(),
+            "learnedLanesFlag": settings.use_learned_lanes,
+            "learnedLanesActive": (
+                settings.use_learned_lanes and learned_lanes.is_available()
+            ),
         },
     }

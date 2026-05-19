@@ -56,6 +56,7 @@ def detect_beats(
     sr: int,
     content_hash: str | None = None,
     use_beat_this: bool | None = None,
+    device: str | None = None,
 ) -> BeatInfo:
     """Run beat tracking. Returns tempo, beats, downbeats, and bpm curve.
 
@@ -90,7 +91,7 @@ def detect_beats(
                 bpm_curve=cached.bpm_curve,
                 source="beat-this (cached)",
             )
-        info = _detect_with_beat_this(y=y, sr=sr)
+        info = _detect_with_beat_this(y=y, sr=sr, device=device)
         if info is not None:
             beat_cache.put(
                 content_hash=content_hash,
@@ -111,10 +112,11 @@ def _detect_with_beat_this(
     *,
     y: "np.ndarray",
     sr: int,
+    device: str | None = None,
 ) -> BeatInfo | None:
     """Beat This! path. Returns None on any failure so the caller can fall back."""
     t0 = time.perf_counter()
-    result = beat_this.detect(y=y, sr=sr)
+    result = beat_this.detect(y=y, sr=sr, device=device)
     elapsed = time.perf_counter() - t0
     if result is None:
         return None

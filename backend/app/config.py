@@ -29,6 +29,12 @@ class Settings:
     # (verse / chorus / breakdown) and drive per-section note density.
     # Falls back to RMS-based bucketing on any failure.
     use_mert: bool
+    # Phase 5 of docs/ML_PLAN.md (full plan in docs/PHASE5_PLAN.md).
+    # When True AND a trained model is at backend/models/lane_v1/ AND
+    # lightgbm is importable, the pipeline picks lanes via the learned
+    # model. Falls back to the rule-based assigner on any failure
+    # (no artifact, no lightgbm, schema mismatch, inference error).
+    use_learned_lanes: bool
     cors_origins: list[str]
     log_level: str
 
@@ -46,6 +52,7 @@ class Settings:
             use_demucs=_bool(os.environ.get("USE_DEMUCS"), default=False),
             use_beat_this=_bool(os.environ.get("USE_BEAT_THIS"), default=False),
             use_mert=_bool(os.environ.get("USE_MERT"), default=False),
+            use_learned_lanes=_bool(os.environ.get("USE_LEARNED_LANES"), default=False),
             cors_origins=origins or ["*"],
             log_level=os.environ.get("LOG_LEVEL", "info"),
         )

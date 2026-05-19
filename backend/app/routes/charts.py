@@ -54,10 +54,18 @@ def _mode_key() -> str:
     are deliberately ignored - they shouldn't change chart output.
     """
     major_minor = ".".join(PIPELINE_VERSION.split(".")[:2])
-    return (
+    base = (
         f"v{major_minor}-bt{int(settings.use_beat_this)}"
         f"-dm{int(settings.use_demucs)}-mt{int(settings.use_mert)}"
     )
+    # Only add the learned-lanes suffix when the flag is ON, so existing
+    # cache rows (written before Phase 5 landed) still match when learned
+    # lanes are off. This is the default, so the cache stays warm across
+    # the Phase 5 rollout. Reset_cache.py's mode patterns also keep
+    # working because their LIKE filters end at `-mt{0|1}`.
+    if settings.use_learned_lanes:
+        base += "-ln1"
+    return base
 
 
 def _cache_key(base: str) -> str:

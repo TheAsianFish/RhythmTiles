@@ -30,7 +30,7 @@ from app.models import (
     Section,
 )
 from app.config import settings
-from app.ml import onset_cache
+from app.ml import learned_lanes, onset_cache
 from app.ml import mert, section_cache
 from app.ml import sections as ml_sections
 from app.pipeline.beat_fill import add_subdivision_onsets, fill_empty_beats
@@ -219,6 +219,7 @@ def build_chart_from_audio(
     use_beat_this: bool | None = None,
     use_demucs: bool | None = None,
     use_mert: bool | None = None,
+    use_learned_lanes: bool | None = None,
 ) -> Chart:
     """Run the full pipeline on the given audio. Returns Chart.
 
@@ -232,6 +233,9 @@ def build_chart_from_audio(
     """
     use_demucs_eff = settings.use_demucs if use_demucs is None else use_demucs
     use_mert_eff = settings.use_mert if use_mert is None else use_mert
+    use_learned_lanes_eff = (
+        settings.use_learned_lanes if use_learned_lanes is None else use_learned_lanes
+    )
     try:
         y, sr = load_audio_to_mono(audio_bytes)
     except Exception as exc:  # pragma: no cover
@@ -275,6 +279,12 @@ def build_chart_from_audio(
             content_hash=content_hash, source="per-stem",
         ) or []
 
+    # `stems` is captured in this scope so the learned-lanes path further
+    # down can read per-stem RMS. When the onset cache hits (cached_stem_onsets
+    # is non-empty), we skip Demucs entirely and `stems` stays as the cheap
+    # pass-through. The learned-lanes module degrades gracefully when stems
+    # are pass-through (per-stem RMS columns just equal full-mix RMS).
+    stems = separate_stems(y, sr, use_demucs=False)
     if cached_stem_onsets:
         onsets = cached_stem_onsets
         drum_count = sum(1 for o in onsets if o.stem == "drums")
@@ -372,6 +382,27 @@ def build_chart_from_audio(
         # accent gate it has always used.
         downbeats=beat_info.downbeats,
     )
+    # Phase 5: when the learned-lane model is active AND loads cleanly,
+    # replace the rule-based lane assignments with model predictions. The
+    # model returns None on any failure (missing artifact, schema mismatch,
+    # inference error), in which case we keep the rule-based output. See
+    # docs/PHASE5_PLAN.md.
+    if use_learned_lanes_eff and learned_lanes.is_available():
+        learned_notes = learned_lanes.assign_lanes_learned(
+            onsets=onsets,
+            y=y,
+            sr=sr,
+            beat_info=beat_info,
+            stems=stems,
+            mert_sections=mert_sections,
+        )
+        if learned_notes is not None:
+            logger.info(
+                "learned-lanes assigned %d notes (was rule-based %d)",
+                len(learned_notes),
+                len(raw_notes),
+            )
+            raw_notes = learned_notes
     # Energy buckets always come from the per-note RMS curve. The MERT
     # section bucketing we tried (one bucket per labeled section) skews
     # heavily when section count is low: with K=4 and q33/q67 across only

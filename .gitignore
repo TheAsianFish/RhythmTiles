@@ -29,6 +29,10 @@ backend/dist/
 # Audio + cache
 backend/cache/
 backend/data/
+
+# Trained ML artifacts (Phase 5 learned-lane model + future weights).
+# Distributed out-of-band via Release assets / S3 / hf hub, not git.
+backend/models/
 *.wav
 *.mp3
 *.flac

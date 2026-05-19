@@ -273,20 +273,32 @@ If we reopen, candidates would be:
 
 ---
 
-### Phase 5 (deferred): learned lane assignment
+### Phase 5: learned lane assignment
 
-Not planned. Research confirmed no off-the-shelf model exists.
-Mapperatorinator's tokens are mania-specific but community-reported
-to underperform human mappers.
+ACTIVE. See `docs/PHASE5_PLAN.md` for the full execution roadmap.
 
-If we reopen later: gradient boost classifier on osu!mania community
-chart features (audio centroid, pitch contour, beat position, local
-density, stem source). Training data: osu! Ranked + Approved maps,
-CC-licensed.
+Summary: train a per-onset LightGBM classifier (4-way, lane 0-3) on
+osu!mania 4K Ranked + Approved community charts. Trained at the
+chart's own hit times so onset-detection-to-chart alignment never
+becomes a failure mode. Inference applies the same feature schema
+at our detector's onset times. Falls back to the rule-based
+assigner on missing model / inference error / unsupported
+features. Gated behind `USE_LEARNED_LANES=1`.
 
-Effort: 3-6 weeks. Defer until Phase 1-3 are stable and the
-remaining quality gap is provably lane-assignment-shaped (not beat-
-grid or section-detection-shaped).
+Research corrections vs the original Phase 5 sketch:
+
+- No clean CC-BY-NC license on osu!mania charts; community operates
+  on research-fair-use posture with explicit no-redistribution.
+- `.osz` (audio + chart) requires user-grant OAuth; `.osu` (chart
+  only) is unauth via `osu.ppy.sh/osu/{id}`. Use community mirrors
+  (nerinyan.moe) for audio bundle.
+- Prior art to borrow from: GOCT (ISMIR 2023) tokenization,
+  Mania Archetype (2024) evaluation methodology, BeatLearning's
+  mania encoding. Mapperatorinator is reference, not a fine-tune
+  target.
+
+Effort: ~7 working days for v1 LightGBM classifier. v2 sequence
+model is another ~7 days if v1 plateaus below human-feel target.
 
 ---
 

@@ -38,6 +38,20 @@ ml = ["beat-this>=0.1.0", "torch>=2.0"]
 # detection. CC-BY-NC weights (95M variant ~380MB); requires HuggingFace
 # transformers. Only required for USE_MERT=1.
 mert = ["transformers>=4.36", "huggingface-hub>=0.20"]
+# Phase 5 INFERENCE (docs/PHASE5_PLAN.md): LightGBM for the learned-lane
+# classifier. Only required for USE_LEARNED_LANES=1 in the serving path.
+# The trained artifact (backend/models/lane_v1/) is NOT shipped via pip;
+# fetch it separately or train your own.
+learned_lanes = ["lightgbm>=4.0"]
+# Phase 5 TRAINING (offline only): API client + feature extraction +
+# training script. Pulls lightgbm, pyarrow (parquet shards), and the
+# audio stack via [ml] + [demucs] + [mert] which are required to run
+# the feature extractor on real .osz audio. Install with:
+#   pip install -e ".[training,ml,demucs,mert]"
+training = [
+  "lightgbm>=4.0",
+  "pyarrow>=15.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["app*"]
