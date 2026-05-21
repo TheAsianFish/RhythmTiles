@@ -54,6 +54,10 @@ export interface BackendMlFlags {
   demucsFlag: boolean;
   mertFlag?: boolean;
   mertActive?: boolean;
+  // Phase 5: learned lane assignment model. Flag = env var set;
+  // Active = artifact loaded and ready to predict at request time.
+  learnedLanesFlag?: boolean;
+  learnedLanesActive?: boolean;
 }
 
 export interface HealthPing {

@@ -51,6 +51,30 @@ DEFAULT_MODEL_DIR = Path("backend/models/lane_v1")
 # in the same lane within this many seconds. Matches lane_assign.HIT_WINDOW_S.
 HIT_WINDOW_S = 0.080
 
+# How many recently-predicted lanes we keep for the distribution correction.
+# 16 = roughly one phrase at typical pop tempo. Larger = stabler correction
+# but reacts slowly; smaller = punchier but noisy.
+_RECENT_WINDOW = 16
+
+# Lane index -> hand (0=left D/F, 1=right J/K). Mirrors lane_assign.py.
+_HAND_OF_LANE = (0, 0, 1, 1)
+
+# Forbid extending a same-hand streak past this length when the model
+# would otherwise add another. Matches the rule-based assigner's
+# MAX_SAME_HAND_STREAK so the learned path has the same playability
+# floor as the heuristic path.
+_MAX_SAME_HAND_STREAK = 2
+
+# Scale on the lane-distribution penalty subtracted from over-represented
+# lanes' logits. LightGBM softmax logits at our scale are typically in
+# [-2, 2]; a penalty around 1.5 is firm but doesn't completely override
+# the model when its confidence is genuinely high.
+_DISTRIBUTION_PENALTY_SCALE = 1.5
+
+# Target lane distribution. Uniform is the right target for 4K mania
+# (human mappers average ~25% per lane across full songs).
+_TARGET_LANE_DIST = (0.25, 0.25, 0.25, 0.25)
+
 
 @dataclass
 class _LoadedModel:
@@ -68,12 +92,18 @@ _LOAD_FAILED: bool = False  # latched after the first unrecoverable failure
 
 
 def is_available() -> bool:
-    """True iff the learned-lane model can be loaded.
+    """True iff a learned-lane model can be loaded for the active architecture.
 
-    Cheap on the second call (cached). Returns False if either LightGBM
-    is missing, the artifact directory is missing, or a previous load
-    attempt failed.
+    Cheap on the second call (cached). When LEARNED_LANES_ARCH=transformer,
+    we check the transformer artifact. Otherwise (default), we check the
+    LightGBM artifact.
     """
+    arch = _resolve_architecture()
+    if arch == "transformer":
+        # Transformer is the primary; v1 LightGBM is optional fallback.
+        from app.ml import lane_transformer_inference  # noqa: WPS433
+        return lane_transformer_inference.is_available()
+    # LightGBM path (default)
     if _LOAD_FAILED:
         return False
     if _MODEL is not None:
@@ -114,8 +144,14 @@ def assign_lanes_learned(
     if not onsets:
         return []
 
+    arch = _resolve_architecture()
+    # For arch=transformer we don't strictly need the v1 LightGBM model
+    # loaded — the transformer can run on its own. We do still try to
+    # load it because (a) it serves as fallback if transformer fails
+    # mid-inference, and (b) the schema-version check below uses the
+    # v1 metadata to validate runtime feature schema.
     model = _load_model()
-    if model is None:
+    if model is None and arch != "transformer":
         return None
 
     try:
@@ -128,7 +164,7 @@ def assign_lanes_learned(
         logger.warning("training package missing, cannot extract features: %s", exc)
         return None
 
-    if tuple(model.feature_columns) != ALL_FEATURE_COLUMNS:
+    if model is not None and tuple(model.feature_columns) != ALL_FEATURE_COLUMNS:
         logger.error(
             "feature schema mismatch: model expects %d cols, current schema has %d. "
             "Retrain or use a model trained on the current schema.",
@@ -169,31 +205,85 @@ def assign_lanes_learned(
         logger.exception("feature extraction failed, falling back: %s", exc)
         return None
 
-    # Now predict autoregressively.
+    # Now predict. Two paths:
+    #   - v1 (LightGBM, default): per-event prediction with autoregressive
+    #     prev_lane patching.
+    #   - v2 (Transformer, LEARNED_LANES_ARCH=transformer): pre-compute a
+    #     whole-song logit matrix in one batched pass, then loop and pick
+    #     lanes with the same postprocessor.
     import numpy as np  # noqa: WPS433
+
+    arch = _resolve_architecture()
+    transformer_logits = None
+    if arch == "transformer":
+        from app.ml import lane_transformer_inference  # noqa: WPS433
+
+        if lane_transformer_inference.is_available():
+            # For Transformer inference we feed a single feature matrix.
+            # prev_lane history is implicit in the sequence — the model
+            # sees the surrounding context and learns the prev-lane
+            # correlations itself, so we don't need to patch one-hot
+            # prev-lane features (and the v2 schema stores zeros there
+            # to avoid confusing it).
+            feature_matrix = np.array(
+                [
+                    [_flatten_value(row, col) for col in ALL_FEATURE_COLUMNS]
+                    for row in rows
+                ],
+                dtype=np.float32,
+            )
+            transformer_logits = lane_transformer_inference.predict_per_event_logits(
+                feature_matrix,
+            )
+            if transformer_logits is None:
+                logger.warning(
+                    "transformer inference returned None; falling back to v1 LightGBM",
+                )
 
     notes: list[RawNote] = []
     last_hit = [-1e9, -1e9, -1e9, -1e9]
     prev_lane: int | None = None
-    booster = model.booster  # type: ignore[assignment]
-    for row, onset in zip(rows, onsets):
+    # Rolling window of the last N predicted lanes, used for the lane-
+    # distribution correction. Larger window = slower adaptation but
+    # more stable; smaller = punchy correction but noisy. 16 = about
+    # 1-2 measures at typical pop tempos.
+    recent_lanes: list[int] = []
+    booster = model.booster if model is not None else None  # type: ignore[assignment]
+    for event_idx, (row, onset) in enumerate(zip(rows, onsets)):
         _patch_prev_lane(row, prev_lane)
-        feature_vec = np.array(
-            [
-                _flatten_value(row, col)
-                for col in ALL_FEATURE_COLUMNS
-            ],
-            dtype=np.float32,
-        ).reshape(1, -1)
-        try:
-            logits = booster.predict(feature_vec)[0]  # type: ignore[attr-defined]
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("inference failed on onset t=%.3f: %s", onset.t, exc)
+        if transformer_logits is not None:
+            # Transformer path: pre-computed; just look up.
+            raw_logits = transformer_logits[event_idx]
+        elif booster is not None:
+            # v1 LightGBM path: per-event predict.
+            feature_vec = np.array(
+                [
+                    _flatten_value(row, col)
+                    for col in ALL_FEATURE_COLUMNS
+                ],
+                dtype=np.float32,
+            ).reshape(1, -1)
+            try:
+                raw_logits = booster.predict(feature_vec)[0]  # type: ignore[attr-defined]
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("inference failed on onset t=%.3f: %s", onset.t, exc)
+                return None
+        else:
+            # Neither path available; bail and let the caller fall back to rules.
             return None
-        lane = _pick_lane_with_anticluster(
-            logits=logits,
+        # Postprocessor 1: penalize lanes that have been over-represented
+        # in the recent window. This directly fights the F/J bias the
+        # raw model exhibits on Western pop music.
+        adjusted_logits = _apply_distribution_correction(
+            logits=raw_logits, recent_lanes=recent_lanes,
+        )
+        # Postprocessor 2: pick the best-scoring lane that also satisfies
+        # anti-cluster AND hand-balance constraints.
+        lane = _pick_lane_with_constraints(
+            logits=adjusted_logits,
             last_hit=last_hit,
             onset_t=float(onset.t),
+            recent_lanes=recent_lanes,
         )
         if lane is None:
             # All four lanes too recent; drop (matches rule-based behaviour).
@@ -207,6 +297,9 @@ def assign_lanes_learned(
             ),
         )
         last_hit[lane] = float(onset.t)
+        recent_lanes.append(int(lane))
+        if len(recent_lanes) > _RECENT_WINDOW:
+            recent_lanes.pop(0)
         prev_lane = int(lane)
     return notes
 
@@ -273,6 +366,15 @@ def _load_model() -> _LoadedModel | None:
         return _MODEL
 
 
+def _resolve_architecture() -> str:
+    """Return 'transformer' or 'lightgbm' based on LEARNED_LANES_ARCH env."""
+    import os  # noqa: WPS433
+    arch = os.environ.get("LEARNED_LANES_ARCH", "lightgbm").strip().lower()
+    if arch in ("transformer", "v2"):
+        return "transformer"
+    return "lightgbm"
+
+
 def _resolve_model_dir() -> Path:
     """Honour LEARNED_LANES_MODEL_DIR env override; else use DEFAULT_MODEL_DIR."""
     import os  # noqa: WPS433
@@ -305,14 +407,30 @@ def _hydrate_with_caller_outputs(
     """
     from app.training.features import _mert_bucket_at, _rms_at_time  # noqa: WPS433
 
+    import numpy as np  # noqa: WPS433
+
     for row, t in zip(rows, times):
-        row.audio["rms_drums"] = _rms_at_time(stems.drums, sr=sr, t=t)
-        row.audio["rms_vocals"] = _rms_at_time(stems.vocals, sr=sr, t=t)
-        row.audio["rms_bass"] = _rms_at_time(stems.bass, sr=sr, t=t)
-        row.audio["rms_other"] = _rms_at_time(stems.other, sr=sr, t=t)
+        rms_drums = _rms_at_time(stems.drums, sr=sr, t=t)
+        rms_vocals = _rms_at_time(stems.vocals, sr=sr, t=t)
+        rms_bass = _rms_at_time(stems.bass, sr=sr, t=t)
+        rms_other = _rms_at_time(stems.other, sr=sr, t=t)
+        row.audio["rms_drums"] = rms_drums
+        row.audio["rms_vocals"] = rms_vocals
+        row.audio["rms_bass"] = rms_bass
+        row.audio["rms_other"] = rms_other
         row.audio["mert_section_bucket"] = float(
             _mert_bucket_at(t=t, sections=mert_sections),
         )
+        # v2.0 feature: recompute dominant_stem one-hot from the
+        # caller-supplied (real) per-stem RMS rather than the
+        # pass-through values the inline extractor would have written.
+        if "dominant_stem_drums" in row.audio:
+            stem_rms = (rms_drums, rms_vocals, rms_bass, rms_other)
+            dom = int(np.argmax(stem_rms))
+            row.audio["dominant_stem_drums"] = 1.0 if dom == 0 else 0.0
+            row.audio["dominant_stem_vocals"] = 1.0 if dom == 1 else 0.0
+            row.audio["dominant_stem_bass"] = 1.0 if dom == 2 else 0.0
+            row.audio["dominant_stem_other"] = 1.0 if dom == 3 else 0.0
 
 
 def _patch_prev_lane(row, prev_lane: int | None) -> None:
@@ -334,19 +452,93 @@ def _flatten_value(row, col: str) -> float:
     return float(row.context[col])
 
 
-def _pick_lane_with_anticluster(
+def _apply_distribution_correction(
+    *,
+    logits,
+    recent_lanes: list[int],
+):
+    """Subtract a penalty from over-represented lanes' logits.
+
+    Penalty = max(0, actual_share - target_share) * scale, applied per
+    lane. So a lane that's already 40% of the recent window when target
+    is 25% gets a 0.15 * scale penalty subtracted from its logit. Lanes
+    at or below target are untouched.
+
+    This directly counters the F/J bias the raw v0.1/v0.2 models exhibit
+    on Western pop music without changing the model's understanding of
+    which lane is musically right; it just lowers the threshold for D/K
+    to win when the recent stream has been F/J-heavy.
+
+    No-op for the first _RECENT_WINDOW notes (signal isn't stable yet).
+    """
+    import numpy as np  # noqa: WPS433
+
+    if len(recent_lanes) < _RECENT_WINDOW // 2:
+        return logits
+    counts = [0, 0, 0, 0]
+    for L in recent_lanes:
+        counts[int(L)] += 1
+    n = len(recent_lanes)
+    penalty = np.array(
+        [
+            max(0.0, (counts[i] / n) - _TARGET_LANE_DIST[i]) * _DISTRIBUTION_PENALTY_SCALE
+            for i in range(4)
+        ],
+        dtype=np.float32,
+    )
+    return np.asarray(logits, dtype=np.float32) - penalty
+
+
+def _pick_lane_with_constraints(
     *,
     logits,
     last_hit: list[float],
     onset_t: float,
+    recent_lanes: list[int],
 ) -> int | None:
-    """Pick the highest-scoring lane that isn't busy within HIT_WINDOW_S."""
-    # numpy import is deferred to keep this module light on import.
+    """Pick the best-scoring lane satisfying anti-cluster + hand-balance.
+
+    Two-pass:
+      1. Pick the best lane satisfying BOTH anti-cluster and hand-balance.
+      2. If no lane satisfies both, relax hand-balance (keep anti-cluster).
+
+    Returns None only when all four lanes were used within HIT_WINDOW_S
+    of `onset_t`, in which case the caller drops the onset (matches the
+    rule-based assigner's policy).
+    """
     import numpy as np  # noqa: WPS433
 
     order = np.argsort(-np.asarray(logits))
+
+    # Build the same-hand-streak picture from recent_lanes.
+    same_hand_streak = 0
+    last_hand: int = -1
+    for L in recent_lanes:
+        h = _HAND_OF_LANE[int(L)]
+        if h == last_hand:
+            same_hand_streak += 1
+        else:
+            same_hand_streak = 1
+        last_hand = h
+
+    # Pass 1: anti-cluster AND hand-balance.
+    for lane in order:
+        lane = int(lane)
+        if onset_t - last_hit[lane] < HIT_WINDOW_S:
+            continue
+        candidate_hand = _HAND_OF_LANE[lane]
+        if (
+            same_hand_streak >= _MAX_SAME_HAND_STREAK
+            and candidate_hand == last_hand
+        ):
+            continue
+        return lane
+
+    # Pass 2: anti-cluster only. The model + dist correction picked it;
+    # better to accept a same-hand-streak violation than drop the note.
     for lane in order:
         lane = int(lane)
         if onset_t - last_hit[lane] >= HIT_WINDOW_S:
             return lane
+
     return None

@@ -151,3 +151,68 @@ def test_cache_key_appends_ln1_when_learned_lanes_on(monkeypatch):
     reload(charts_route)
     key = charts_route._mode_key()
     assert key.endswith("-ln1"), f"expected -ln1 suffix, got {key!r}"
+
+
+def test_distribution_correction_penalizes_over_represented_lanes():
+    """When the recent window is F/J-heavy, F/J logits get penalized so a
+    D or K that was close to winning now wins. This is the postprocessor
+    that fights the v0.1/v0.2 F/J bias on Western pop."""
+    import numpy as np
+
+    # Recent window: 12 F/J notes, 0 D/K notes. Maximum imbalance.
+    recent = [1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2]
+    # Raw logits: lane 1 (F) slightly wins, lane 0 (D) close behind.
+    raw_logits = np.array([1.0, 1.2, 0.4, 0.3], dtype=np.float32)
+    adjusted = learned_lanes._apply_distribution_correction(
+        logits=raw_logits, recent_lanes=recent,
+    )
+    # F and J each got ~50% of recent, so each is penalized by
+    # (0.5 - 0.25) * 1.5 = 0.375. D and K were 0% so they get 0 penalty.
+    # After: lane 0 (D) at 1.0 should now beat lane 1 (F) at 1.2 - 0.375 = 0.825.
+    assert int(np.argmax(adjusted)) == 0
+
+
+def test_distribution_correction_noop_when_window_too_small():
+    """Don't correct during the first few notes — signal isn't stable."""
+    import numpy as np
+
+    raw_logits = np.array([0.1, 0.9, 0.0, 0.0], dtype=np.float32)
+    adjusted = learned_lanes._apply_distribution_correction(
+        logits=raw_logits, recent_lanes=[1, 2, 1],  # below _RECENT_WINDOW / 2
+    )
+    np.testing.assert_array_equal(adjusted, raw_logits)
+
+
+def test_pick_lane_with_constraints_blocks_third_same_hand():
+    """After 2 left-hand picks, the postprocessor blocks a 3rd left-hand
+    pick even if the model's argmax says so."""
+    import numpy as np
+
+    # Model wants lane 1 (F = left hand) again. recent_lanes ends with two
+    # left-hand picks already.
+    logits = np.array([0.2, 1.0, 0.5, 0.3], dtype=np.float32)
+    last_hit = [-1e9, -1e9, -1e9, -1e9]
+    recent = [0, 1]  # D then F = two left-hand
+    lane = learned_lanes._pick_lane_with_constraints(
+        logits=logits, last_hit=last_hit, onset_t=10.0, recent_lanes=recent,
+    )
+    # Should NOT be 0 or 1 (left hand); must be 2 or 3 (right hand). The
+    # second-best right-hand logit is lane 2 at 0.5, so it should win.
+    assert lane in (2, 3)
+
+
+def test_pick_lane_relaxes_hand_balance_when_anti_cluster_blocks_other_hand():
+    """If both right-hand lanes are too recent, fall back to a left-hand
+    pick even though it violates the streak rule, rather than drop the note."""
+    import numpy as np
+
+    logits = np.array([0.2, 1.0, 0.5, 0.3], dtype=np.float32)
+    # Both right-hand lanes used VERY recently (less than HIT_WINDOW_S ago).
+    last_hit = [-1e9, -1e9, 9.99, 9.98]
+    recent = [0, 1]  # two left-hand in streak
+    lane = learned_lanes._pick_lane_with_constraints(
+        logits=logits, last_hit=last_hit, onset_t=10.0, recent_lanes=recent,
+    )
+    # Right hand blocked by anti-cluster, hand-balance forces left.
+    # Pass 2 picks the best left-hand lane, which is lane 1 (F) at 1.0.
+    assert lane == 1

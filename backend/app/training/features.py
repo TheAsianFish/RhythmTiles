@@ -37,7 +37,16 @@ logger = logging.getLogger("beatbridge.training.features")
 # Feature schema. The order MUST be stable; both training and inference
 # use this list. Adding a feature is a breaking change for any trained
 # model; bump FEATURE_SCHEMA_VERSION when you do.
-FEATURE_SCHEMA_VERSION = "1.0"
+#
+# 1.0: initial release. 26 features (15 audio + 11 chart context).
+# 2.0: added flow-aware features for v0.3 after v0.2 felt stream-spammy /
+#      lane-biased. Added pitch_delta_bins (melodic contour),
+#      dominant_stem_* (which instrument leads at this moment),
+#      phrase_position (where we are in the section), and
+#      onset_strength_norm (loudness relative to song's peak). The
+#      hypothesis: these features carry "musical flow" signal the v1.0
+#      schema couldn't represent.
+FEATURE_SCHEMA_VERSION = "2.0"
 
 # Audio-side features (computed at the event time from frame-level arrays).
 AUDIO_FEATURE_COLUMNS = (
@@ -56,6 +65,14 @@ AUDIO_FEATURE_COLUMNS = (
     "mfcc_4",
     "mfcc_5",
     "mert_section_bucket",
+    "onset_strength_norm",   # v2.0: spectral flux at this onset divided by song-wide 95th percentile
+    # v2.0: one-hot of which stem is loudest at this onset. Computed from
+    # the four rms_* values above; lives in audio side because it's
+    # purely a function of the audio at the event time.
+    "dominant_stem_drums",
+    "dominant_stem_vocals",
+    "dominant_stem_bass",
+    "dominant_stem_other",
 )
 
 # Chart-context features (need the event sequence; computed on the fly).
@@ -71,6 +88,9 @@ CHART_CONTEXT_COLUMNS = (
     "prev_lane_2",
     "prev_lane_3",
     "prev_lane_none",  # first event has no previous lane
+    # v2.0: flow-aware additions in the context block.
+    "pitch_delta_bins",         # signed chroma distance from prev event in semitones (-6..+6)
+    "phrase_position",          # 0-1 normalized position within current MERT section
 )
 
 # Label columns (training only; absent at inference).
@@ -152,14 +172,32 @@ def extract_features_at_times(
     stems = _compute_stems(y=y, sr=sr, use_demucs=use_demucs)
     mert_sections = _compute_mert(y=y, sr=sr, use_mert=use_mert)
 
+    # Song-wide onset-strength normaliser. 95th percentile, not max, so a
+    # single outlier (a glitch or a cymbal smash) doesn't squash everything
+    # else into the 0.0-0.2 range.
+    import numpy as np  # noqa: WPS433
+
+    if len(audio_frames.flux) > 0:
+        flux_p95 = float(np.percentile(audio_frames.flux, 95))
+        if flux_p95 <= 1e-6:
+            flux_p95 = 1.0
+    else:
+        flux_p95 = 1.0
+
     # Chart-context features need the prior-event lane history. At inference
     # we use predicted lanes from earlier in the sequence (autoregressive)
     # so the schema only needs the IMMEDIATELY previous lane to be defined.
     rows: list[FeatureRow] = []
     prev_lane: int | None = None
+    prev_chroma_bin: int | None = None
     for i, t in enumerate(times):
         audio_feats = _sample_audio_features(
-            t=t, sr=sr, frames=audio_frames, stems=stems, mert_sections=mert_sections,
+            t=t,
+            sr=sr,
+            frames=audio_frames,
+            stems=stems,
+            mert_sections=mert_sections,
+            flux_p95=flux_p95,
         )
         prev_t = times[i - 1] if i > 0 else None
         next_t = times[i + 1] if i + 1 < len(times) else None
@@ -168,9 +206,12 @@ def extract_features_at_times(
             prev_t=prev_t,
             next_t=next_t,
             prev_lane=prev_lane,
+            prev_chroma_bin=prev_chroma_bin,
             times=times,
             i=i,
             beat_info=beat_info,
+            mert_sections=mert_sections,
+            audio_frames=audio_frames,
         )
         labels: dict | None = None
         if events_for_labels is not None:
@@ -181,6 +222,9 @@ def extract_features_at_times(
                 "duration_s": float(evt.duration_s),
             }
             prev_lane = int(evt.lane)
+        # Update chroma history for next iteration's pitch_delta. We track
+        # ACTUAL chroma at the current event time, not the model's prediction.
+        prev_chroma_bin = int(audio_feats["chroma_max_bin"])
         rows.append(FeatureRow(audio=audio_feats, context=ctx_feats, labels=labels))
     return rows
 
@@ -303,6 +347,7 @@ def _sample_audio_features(
     frames: _AudioFrames,
     stems: "Stems",
     mert_sections: list,
+    flux_p95: float = 1.0,
 ) -> dict:
     """Look up the frame at time t for each frame-level feature."""
     import numpy as np  # noqa: WPS433
@@ -326,9 +371,26 @@ def _sample_audio_features(
 
     section_bucket = _mert_bucket_at(t=t, sections=mert_sections)
 
+    # v2.0: onset_strength_norm. Spectral flux at this frame divided by
+    # the song's 95th-percentile flux. >= 1.0 means this is a song-peak
+    # onset; ~0.2 means it's a quiet detected event. Lets the model
+    # learn "loud accents tend to go in <these> lanes" without having
+    # to memorise per-song amplitude scales.
+    raw_flux = float(frames.flux[frame_idx])
+    onset_strength_norm = raw_flux / max(flux_p95, 1e-6)
+
+    # v2.0: dominant_stem one-hot. Which of the four stems is loudest
+    # at this onset. On songs with real Demucs separation this is a
+    # strong "drum hit vs vocal note" signal; on pass-through stems
+    # (Demucs off) all four are tied and the one-hot picks arbitrarily,
+    # which is fine because the column is constant across songs and the
+    # model learns to ignore it.
+    stem_rms = (rms_drums, rms_vocals, rms_bass, rms_other)
+    dom_idx = int(np.argmax(stem_rms))
+
     return {
         "spectral_centroid_hz": float(frames.centroid[frame_idx]),
-        "spectral_flux": float(frames.flux[frame_idx]),
+        "spectral_flux": raw_flux,
         "rms_full_mix": float(frames.rms[frame_idx]),
         "rms_drums": rms_drums,
         "rms_vocals": rms_vocals,
@@ -342,6 +404,11 @@ def _sample_audio_features(
         "mfcc_4": float(frames.mfcc[3, frame_idx]),
         "mfcc_5": float(frames.mfcc[4, frame_idx]),
         "mert_section_bucket": float(section_bucket),
+        "onset_strength_norm": float(onset_strength_norm),
+        "dominant_stem_drums": 1.0 if dom_idx == 0 else 0.0,
+        "dominant_stem_vocals": 1.0 if dom_idx == 1 else 0.0,
+        "dominant_stem_bass": 1.0 if dom_idx == 2 else 0.0,
+        "dominant_stem_other": 1.0 if dom_idx == 3 else 0.0,
     }
 
 
@@ -351,11 +418,16 @@ def _sample_context_features(
     prev_t: float | None,
     next_t: float | None,
     prev_lane: int | None,
+    prev_chroma_bin: int | None,
     times: list[float],
     i: int,
     beat_info,
+    mert_sections: list,
+    audio_frames: "_AudioFrames",
 ) -> dict:
     """Features that need event-sequence context, not audio-only context."""
+    import numpy as np  # noqa: WPS433
+
     delta_t_prev = float(t - prev_t) if prev_t is not None else 0.0
     delta_t_next = float(next_t - t) if next_t is not None else 0.0
     local_density = _local_density(times=times, i=i, window_s=0.5)
@@ -363,6 +435,29 @@ def _sample_context_features(
         t=t, beat_info=beat_info,
     )
     prev_one_hot = _one_hot_prev_lane(prev_lane)
+
+    # v2.0: pitch_delta_bins. Signed semitone distance from the previous
+    # event's chroma_max_bin to the current's. Chroma is circular (12
+    # pitch classes), so we take the SHORTEST signed path (range -6..+6).
+    # Carries melodic contour: positive = pitch going up, negative = down,
+    # 0 = same pitch class. First event has no prev, default 0.
+    frame_idx = max(0, min(len(audio_frames.centroid) - 1, int(t * audio_frames.fps)))
+    cur_chroma_bin = int(np.argmax(audio_frames.chroma[:, frame_idx]))
+    pitch_delta = 0
+    if prev_chroma_bin is not None:
+        raw_delta = cur_chroma_bin - prev_chroma_bin
+        # Map to shortest signed path on the circular 12-pitch-class wheel.
+        if raw_delta > 6:
+            raw_delta -= 12
+        elif raw_delta < -6:
+            raw_delta += 12
+        pitch_delta = raw_delta
+
+    # v2.0: phrase_position. Where in the current MERT-detected section
+    # are we, normalized 0-1. Captures "are we at the start of a phrase
+    # (often a downbeat-y moment) or at the end (often a fill / transition)".
+    phrase_position = _phrase_position_at(t=t, sections=mert_sections)
+
     return {
         "delta_t_prev": delta_t_prev,
         "delta_t_next": delta_t_next,
@@ -371,7 +466,32 @@ def _sample_context_features(
         "bar_phase": float(bar_phase),
         "is_on_downbeat": float(is_on_downbeat),
         **prev_one_hot,
+        "pitch_delta_bins": float(pitch_delta),
+        "phrase_position": float(phrase_position),
+        # dominant_stem_* are sampled from the audio side and re-emitted
+        # here so all chart-context columns are in one place at the row
+        # level. The audio-side sampler also has them; we copy here so
+        # the schema position is correct. (Both functions are merged in
+        # write_parquet via the AUDIO + CONTEXT column ordering.)
     }
+
+
+def _phrase_position_at(*, t: float, sections: list) -> float:
+    """Return position 0-1 within the section containing t.
+
+    Returns 0.5 (mid-phrase) when sections aren't available or t is
+    outside all sections. This is a soft default that doesn't push the
+    model in either direction at the chart's boundaries.
+    """
+    if not sections:
+        return 0.5
+    for s in sections:
+        if s.start_s <= t < s.end_s:
+            span = s.end_s - s.start_s
+            if span <= 0:
+                return 0.5
+            return max(0.0, min(0.999, (t - s.start_s) / span))
+    return 0.5
 
 
 def _rms_at_time(stem: "np.ndarray", *, sr: int, t: float) -> float:

@@ -138,52 +138,79 @@ function modeChipFor(
   const demucs = ml.demucsFlag;
   const mertActive = !!ml.mertActive;
   const mertFlagOnly = !!ml.mertFlag && !mertActive;
+  const learnedActive = !!ml.learnedLanesActive;
+  const learnedFlagOnly = !!ml.learnedLanesFlag && !learnedActive;
   // Trailing "+✦" when MERT is active. The base chip already conveys
   // beat / stem state; the trailing sigil signals section-aware density.
   const mertSuffix = mertActive ? "✦" : "";
   const mertTitle = mertActive
     ? " MERT section detection drives per-section density (verses sparse, choruses dense)."
     : "";
+  // Trailing "🅛" when the learned-lane model is active. Visually distinct
+  // from MERT's "✦" so the chip discloses BOTH features when both are on.
+  const learnedSuffix = learnedActive ? "🅛" : learnedFlagOnly ? "⚠🅛" : "";
+  const learnedTitle = learnedActive
+    ? " Learned-lane model (Phase 5) is picking lanes from osu!mania-trained features."
+    : learnedFlagOnly
+      ? " Learned-lane flag set but artifact not loaded; falling back to rule-based lanes."
+      : "";
+  // When learned-lane is the ONLY ML active, label "Baseline +U". When
+  // the full ML-max stack is also on, we relabel "ML-max" -> "ML-ult"
+  // (ultimate) entirely instead of appending. See cases below.
+  const learnedLabel = learnedActive ? " +U" : "";
   if (!beat && !beatFlagOnly && !demucs && !mertActive && !mertFlagOnly) {
     return {
-      symbol: "≋",
-      label: "Baseline",
-      title: "Heuristic pipeline: librosa beats, full-mix onsets, centroid-based lane routing.",
+      symbol: `≋${learnedSuffix}`,
+      label: "Baseline" + learnedLabel,
+      title:
+        "Heuristic pipeline: librosa beats, full-mix onsets, centroid-based lane routing." +
+        learnedTitle,
     };
   }
   if (beat && demucs) {
+    // ML-max + learned-lanes is renamed "ML-ult" (ultimate) rather than
+    // "ML-max +U" so it reads as its own tier on the ladder, not a
+    // sub-variant of ML-max. ML-full + learned-lanes keeps the suffix
+    // since "ML-full + U" is a less-loaded combo.
+    const isUlt = mertActive && learnedActive;
     return {
-      symbol: `♫◓${mertSuffix}`,
-      label: mertActive ? "ML-max" : "ML-full",
+      symbol: `♫◓${mertSuffix}${learnedSuffix}`,
+      label: isUlt
+        ? "ML-ult"
+        : (mertActive ? "ML-max" : "ML-full") + learnedLabel,
       title:
         "Beat This! beats + downbeats + Demucs per-stem onsets. Drum line on left hand, vocal melody on right." +
-        mertTitle,
+        mertTitle +
+        learnedTitle,
     };
   }
   if (beat) {
     return {
-      symbol: `♫${mertSuffix}`,
-      label: mertActive ? "ML-light + sections" : "ML-light",
+      symbol: `♫${mertSuffix}${learnedSuffix}`,
+      label: (mertActive ? "ML-light + sections" : "ML-light") + learnedLabel,
       title:
         "Beat This! beats and downbeats; full-mix onsets with centroid routing." +
-        mertTitle,
+        mertTitle +
+        learnedTitle,
     };
   }
   if (demucs && !beat) {
     return {
-      symbol: `◓${mertSuffix}`,
-      label: "Demucs only",
+      symbol: `◓${mertSuffix}${learnedSuffix}`,
+      label: "Demucs only" + learnedLabel,
       title:
         "Demucs per-stem onsets active; librosa beat tracker (no downbeats)." +
-        mertTitle,
+        mertTitle +
+        learnedTitle,
     };
   }
   if (mertActive) {
     return {
-      symbol: "✦",
-      label: "MERT only",
+      symbol: `✦${learnedSuffix}`,
+      label: "MERT only" + learnedLabel,
       title:
-        "MERT section detection drives density; baseline beats + onsets otherwise.",
+        "MERT section detection drives density; baseline beats + onsets otherwise." +
+        learnedTitle,
     };
   }
   // Flag on but inference path not available (package missing, device error).

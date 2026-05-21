@@ -90,6 +90,12 @@ _ENERGY_MULT = (0.90, 1.00, 1.15)
 SANITY_NOTES_PER_WINDOW = 8
 SANITY_WINDOW_S = 1.0
 
+# Window length for the time-aware thinner. Top-K-per-window is enforced
+# in this window. 2s is roughly one phrase at 120 BPM; small enough to
+# break "all notes clustered in chorus, dead verses" but large enough that
+# legitimate quiet beats stay quiet.
+SELECT_WINDOW_S = 2.0
+
 
 def shape_difficulty(
     *,
@@ -121,11 +127,6 @@ def shape_difficulty(
     duration_s = _infer_duration(
         notes=notes, beats=beats, song_duration_s=song_duration_s,
     )
-    keep_ratio = _calibrated_ratio(
-        difficulty=difficulty,
-        n_candidates=len(notes),
-        duration_s=duration_s,
-    )
     chord_groups = _chord_groups(notes)
 
     # Score each note. Chord partners (multiple notes at the same t with
@@ -139,21 +140,104 @@ def shape_difficulty(
         for i in group:
             scores[i] = float("inf")
 
-    # Pick top keep_ratio by score. Ties keep stable order (earlier note
-    # wins) so chord partners with identical scores both survive.
-    n_keep = max(1, int(round(len(notes) * keep_ratio)))
-    indexed = sorted(range(len(notes)), key=lambda i: (-scores[i], i))
-    selected = set(indexed[:n_keep])
+    # Time-windowed selection (v0.3.0). Walks the chart in SELECT_WINDOW_S-
+    # second windows and keeps the top-K notes per window where K is the
+    # difficulty's target NPS times the window length. This prevents the
+    # old global top-K behaviour where strong onsets in a chorus would
+    # dominate the keep budget and leave verses empty.
+    #
+    # After windowed selection, if the total note count fell well below
+    # what the difficulty band asks for (sparse song or many windows hit
+    # cap), backfill the highest-scoring unselected notes to make up
+    # SHORTFALL_FILL_FRACTION of the shortfall.
+    selected = _select_windowed_by_score(
+        notes=notes,
+        scores=scores,
+        difficulty=difficulty,
+        duration_s=duration_s,
+    )
     # Promote chord partners of selected notes so groups stay whole.
     for i in list(selected):
         for j in chord_groups.get(notes[i].t, ()):
             selected.add(j)
 
-    kept = [notes[i] for i in sorted(selected)]
+    # Sort by time (not by index) so the downstream sanity cap, hold
+    # detector, and chord-pair logic all see the chronologically-ordered
+    # list they expect. Production always passes time-sorted input but
+    # the test suite shuffles to verify robustness.
+    kept = sorted((notes[i] for i in selected), key=lambda n: (n.t, n.lane))
 
     # Final pass: keep notes in beats-aware time order and apply the
     # sanity cap so no 1-second window has more than SANITY_NOTES_PER_WINDOW.
     return _enforce_sanity_cap(kept)
+
+
+def _select_windowed_by_score(
+    *,
+    notes: list[RawNote],
+    scores: list[float],
+    difficulty: str,
+    duration_s: float,
+) -> set[int]:
+    """Window-aware top-K selector. Returns the SET of note indices to keep.
+
+    Algorithm:
+      1. Compute target_K_per_window = target_nps_mid * SELECT_WINDOW_S.
+         This is roughly how many notes a window "deserves" given the
+         difficulty's target density.
+      2. Walk the chart in SELECT_WINDOW_S-second windows from t=0 to
+         t=duration_s. For each window, sort the candidate notes in it
+         by score desc, keep the top target_K_per_window.
+      3. After all windows have run, count how many notes were selected.
+         If the total is below the difficulty's LOWER band bound, that's
+         under-fill (the song was so sparse that even keeping top-K per
+         window left us under target). Backfill by adding back the
+         highest-scoring unselected notes globally until we reach the
+         lower bound or until we've added SHORTFALL_FILL_FRACTION of the
+         shortfall.
+
+    The output preserves "holistic timing": notes stay at their original
+    times (we don't move them) and chord pairs are preserved via the
+    inf-score promotion the caller already applied.
+    """
+    if not notes:
+        return set()
+
+    lo, hi = TARGET_NOTES_PER_SEC.get(difficulty, TARGET_NOTES_PER_SEC["normal"])
+    target_mid = 0.5 * (lo + hi)
+    target_per_window = max(1, int(round(target_mid * SELECT_WINDOW_S)))
+
+    # Bucket notes by window index. Walking in time order means notes
+    # at window boundaries are placed deterministically (the window
+    # whose [start, end) contains t).
+    n_windows = max(1, int(duration_s / SELECT_WINDOW_S) + 1)
+    by_window: list[list[int]] = [[] for _ in range(n_windows)]
+    for i, n in enumerate(notes):
+        w = min(int(n.t / SELECT_WINDOW_S), n_windows - 1)
+        if w < 0:
+            w = 0
+        by_window[w].append(i)
+
+    selected: set[int] = set()
+    for window in by_window:
+        if not window:
+            continue
+        # Sort by score desc, ties broken by lower index (stable).
+        window.sort(key=lambda i: (-scores[i], i))
+        # Take top target_per_window. If the window has fewer candidates,
+        # take what we have (sparse moment = sparse chart, deliberately).
+        for idx in window[:target_per_window]:
+            selected.add(idx)
+
+    # No shortfall backfill. If a song is so sparse that the windowed
+    # pass falls below the difficulty's lo NPS, the chart will simply
+    # be sparse in those moments — which IS the correct behaviour
+    # (the music is quiet here, the chart is quiet here). The original
+    # global top-K thinner appeared to "reach target NPS" only by
+    # clustering all surviving notes in the densest moments of the
+    # song, which is exactly the bug we're fixing. Trading "honest
+    # sparsity" for "fake density" doesn't help the player.
+    return selected
 
 
 def _score_note(

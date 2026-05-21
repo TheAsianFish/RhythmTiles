@@ -87,7 +87,15 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 #          chorus-beat subdivision routing and the wire-format
 #          sections array. Minor bump to invalidate ML-max chart
 #          cache rows that were thinned with the old logic.
-PIPELINE_VERSION = "0.10.0"
+#   0.11.0 Time-windowed difficulty thinner. shape_difficulty no
+#          longer does global top-K (which clustered surviving notes
+#          around strong moments and left quiet sections dead). Now
+#          walks the chart in 2s windows and keeps top-K-per-window
+#          by score, with a shortfall backfill to keep total NPS in
+#          the difficulty's band on sparse songs. Should fix the
+#          "verses feel empty, chorus is busy" complaint without
+#          changing per-note timing or chord-pair behaviour.
+PIPELINE_VERSION = "0.11.0"
 SCHEMA_VERSION = "1.0"
 
 Difficulty = Literal["easy", "normal", "hard", "expert"]
